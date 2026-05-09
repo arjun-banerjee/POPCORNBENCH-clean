@@ -69,3 +69,25 @@ If the goal is "KernelBench for A100-optimized kernels", the ranking is:
 6. ThunderKittens
 
 ThunderKittens is still valuable, but mainly as a reference for kernel structure and scheduling patterns. FlashInfer is the better source for kernels you can justify placing alongside the current local A100 set.
+
+## FlashAttention
+
+FlashAttention is the strongest upstream source for compact exact-attention kernel instantiations. It aligns directly with the existing `09` / `10` slots in the compact `a100` and `h100` sets.
+
+Added compact extensions:
+
+### A100 / FlashAttention-2 (`sm80`)
+
+1. `16_flash_attn2_fwd_hdim64_fp16_sm80.cu` added
+2. `17_flash_attn2_bwd_hdim64_fp16_sm80.cu` added
+3. `18_flash_attn2_fwd_hdim128_bf16_sm80.cu` added
+4. `19_flash_attn2_bwd_hdim128_bf16_sm80.cu` added
+5. `20_flash_attn2_fwd_hdim192_fp16_sm80.cu` added
+6. `21_flash_attn2_bwd_hdim192_fp16_sm80.cu` added
+
+### H100 / FlashAttention-3 (`sm90`)
+
+1. `11_flash_attn3_fwd_hdim128_fp16_sm90.cu` added
+2. `12_flash_attn3_bwd_hdim128_fp16_sm90.cu` added
+3. `13_flash_attn3_fwd_hdim128_bf16_paged_split_softcap_sm90.cu` added
+4. `14_flash_attn3_fwd_hdim192_fp16_paged_softcap_sm90.cu` added
