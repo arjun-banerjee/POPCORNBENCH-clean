@@ -30,6 +30,8 @@ dependencies = [
     "openai",
     "litellm[proxy]",
     "gpn",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.10.8",
 ]
 
 [project.optional-dependencies]
@@ -48,7 +50,6 @@ dev = [
 
 [tool.uv]
 environments = [
-    "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 

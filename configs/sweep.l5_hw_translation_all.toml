@@ -1,10 +1,16 @@
 # Level-5 hardware translation sweep: re-optimize A100-tuned CUDA kernels for H100.
+# Full tool registry (`tools = "all"`).
 #
 # Usage:
-#   uv run python scripts/run_sweep.py configs/sweep.l5_hw_translation.toml
+#   uv run python scripts/run_sweep.py configs/sweep.l5_hw_translation_all.toml
+# See also: configs/sweep.l5_hw_translation_default.toml,
+#           configs/sweep.l5_hw_translation_single_turn.toml,
+#           scripts/run_l5_hw_translation_sweeps.sh
+#
+# See sweep.l5_hw_translation_single_turn.toml header for agent/parallelism knobs.
 
 [run]
-name                    = "l5_hw_translation_single_20260510_gpt"
+name                    = "l5_hw_translation_all_full_20260511_gpt"
 dataset_src             = "local"
 variants                = ["hardware_translation_stub"]
 levels                  = [5]
@@ -27,17 +33,28 @@ hardware_translation_io_dir      = "KernelBench/level5/hardware_translation/io"
 hardware_translation_oracle_dir  = "KernelBench/level5/hardware_translation/oracle"
 
 [agent]
-max_turns               = 10
+max_turns               = 15
 max_tool_calls          = 30
-warn_turns_remaining    = 2
+warn_turns_remaining    = 3
 reasoning_effort        = "medium"
+llm_error_retries       = 5
+tool_output_context_max_chars = 120000
+reasoning_context_max_chars = 0
+chat_context_tail_messages = 96
 
 [parallelism]
 num_gpu_devices         = 8
 agents_per_gpu          = 3
 use_eval_queue          = true
-worker_timeout_s        = 1200
-eval_rpc_timeout_s      = 1200
+# Per-work-item budget uses SIGALRM (scripts/run_sweep.py). If it fires while a
+# worker is blocked on multiprocessing.Manager().Queue.get() for eval RPC, the
+# queue connection corrupts and you see "[eval_client] discarding malformed
+# payload ('NoneType')". For L5 + tools=all + long evals, do NOT set this as low
+# as eval_rpc_timeout_s. Use 0 to disable SIGALRM entirely (no hang watchdog).
+worker_timeout_s        = 14400
+# Includes time waiting in the per-GPU eval FIFO, not just GPU work (see gpu4 depth).
+eval_rpc_timeout_s      = 7200
+llm_global_concurrency  = 0
 
 [report]
 enabled                 = true

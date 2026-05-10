@@ -1,7 +1,7 @@
 """
 Prompts for the KernelBench multi-turn agent.
 
-Three public builders:
+Public builders:
     build_system_prompt(max_turns, max_tool_calls, backend, tool_names) -> str
         The system prompt, passed as `instructions` to the Responses API.
 
@@ -10,6 +10,9 @@ Three public builders:
 
     build_turn_warning_message(turns_remaining, tool_calls_remaining) -> str
         Status note injected as a user-role message once budget is low.
+
+    build_no_tool_calls_nudge() -> str
+        Injected when the model returns no tool/function calls so the run can continue.
 
 Tool descriptions live in `tools.py` and are surfaced to the model as part of
 the function-calling schema. Don't duplicate them here.
@@ -248,3 +251,29 @@ def build_turn_warning_message(
             "want to try, submit now."
         )
     return head + tail
+
+
+def build_no_tool_calls_nudge() -> str:
+    """Injected when the model returns a turn with no function/tool calls.
+
+    Plain text is not enough to finish the run — the harness only executes
+    kernels when tools are invoked. This keeps the conversation going instead
+    of aborting the whole trajectory.
+    """
+    return (
+        "Your last reply had no tool calls. You must call at least one tool "
+        "this turn: use `compile_kernel` / `run_correctness` to iterate, or "
+        "call `submit_kernel` with your best `ModelNew` implementation to "
+        "finalize the run. Responses without tools cannot progress."
+    )
+
+
+def build_final_turn_mandatory_submit_message() -> str:
+    """Stronger policy injection on the last LLM turn (in addition to budget warnings)."""
+    return (
+        "FINAL TURN POLICY: This is your last turn before the session ends. "
+        "You MUST call `submit_kernel` exactly once with your best complete "
+        "`ModelNew` implementation (full executable Python). "
+        "Do not spend this turn only on compile_kernel, run_correctness, or "
+        "analysis tools — submit your kernel now."
+    )

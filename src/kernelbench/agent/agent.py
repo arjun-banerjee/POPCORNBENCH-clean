@@ -37,6 +37,7 @@ import json
 import os
 import time
 import traceback
+from contextlib import contextmanager
 from typing import Any
 
 import torch
@@ -49,6 +50,20 @@ from kernelbench.agent.prompt_templates import (
     build_system_prompt,
     build_problem_message,
     build_turn_warning_message,
+    build_no_tool_calls_nudge,
+    build_final_turn_mandatory_submit_message,
+)
+from kernelbench.agent.llm_utils import (
+    compact_chat_tool_messages,
+    compact_responses_input_items,
+    extract_modelnew_from_response_items,
+    extract_modelnew_kernel_from_text,
+    is_requested_tokens_zero,
+    llm_retry_delay_s,
+    llm_usage_to_dict,
+    log_trimmed_create_kwargs_diagnostics,
+    maybe_sliding_window_chat,
+    truncate_context_str,
 )
 
 
@@ -100,7 +115,14 @@ class KernelAgent:
                             If set, passed to the API as reasoning.effort.
         warn_turns_remaining: Inject warning when this many turns remain.
         turn_delay_s:       Sleep between turns (for rate-limited APIs).
+        llm_error_retries:  Retries (with backoff) per turn when the LLM API
+                            raises or returns an unusable response; set to 1
+                            to fail fast like older versions.
         verbose:            Verbose logging.
+        tool_output_context_max_chars: Truncate tool outputs in LLM context (0 disables).
+        reasoning_context_max_chars: Cap reasoning when compacting chat / storing.
+        chat_context_tail_messages: If set, sliding window on chat history (tail size).
+        llm_concurrency_semaphore: Optional semaphore acquired around each LLM HTTP call.
     """
 
     def __init__(
@@ -126,11 +148,16 @@ class KernelAgent:
         reasoning_effort: str | None = None,
         warn_turns_remaining: int = 2,
         turn_delay_s: float = 0.0,
+        llm_error_retries: int = 3,
         verbose: bool = False,
         api_kind: str = "openai",
         save_path: str | None = None,
         eval_client: Any = None,
         initial_message: str | None = None,
+        tool_output_context_max_chars: int = 120_000,
+        reasoning_context_max_chars: int = 16_000,
+        chat_context_tail_messages: int | None = None,
+        llm_concurrency_semaphore: Any = None,
     ) -> None:
         self.problem_id = problem_id
         self.level = level
@@ -146,9 +173,18 @@ class KernelAgent:
         self.reasoning_effort = reasoning_effort
         self.warn_turns_remaining = warn_turns_remaining
         self.turn_delay_s = turn_delay_s
+        self.llm_error_retries = max(1, int(llm_error_retries))
         self.verbose = verbose
         self.api_kind = api_kind
         self.save_path = save_path
+        self.tool_output_context_max_chars = max(0, int(tool_output_context_max_chars))
+        self.reasoning_context_max_chars = max(0, int(reasoning_context_max_chars))
+        self.chat_context_tail_messages = (
+            int(chat_context_tail_messages)
+            if chat_context_tail_messages is not None
+            else None
+        )
+        self._llm_semaphore = llm_concurrency_semaphore
 
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -193,6 +229,79 @@ class KernelAgent:
 
     def _tag(self) -> str:
         return f"[L{self.level}/P{self.problem_id}/{self.model}]"
+
+    @contextmanager
+    def _llm_acquire(self):
+        sem = self._llm_semaphore
+        if sem is not None:
+            sem.acquire()
+        try:
+            yield
+        finally:
+            if sem is not None:
+                sem.release()
+
+    def _reset_kernel_tracking(self) -> None:
+        self._last_compiled_kernel: str | None = None
+        self._last_correct_kernel: str | None = None
+
+    def _note_kernel_progress(
+        self, tool_name: str, args: dict[str, Any], tool_result: ToolResult
+    ) -> None:
+        if tool_name not in ("compile_kernel", "run_correctness"):
+            return
+        if not tool_result.success:
+            return
+        meta = tool_result.metadata or {}
+        if not meta.get("compiled"):
+            return
+        kc = args.get("kernel_code")
+        if not isinstance(kc, str) or not kc.strip():
+            return
+        self._last_compiled_kernel = kc
+        if meta.get("correctness"):
+            self._last_correct_kernel = kc
+
+    def _best_effort_autofinalize_after_loop(
+        self, trajectory: KernelTrajectory, tag: str
+    ) -> None:
+        """If the model never submitted but we have a compiled kernel, submit once."""
+        if self._final_result is not None:
+            return
+        submit_tool = self.tool_map.get("submit_kernel")
+        if submit_tool is None:
+            return
+        kernel = self._last_correct_kernel or self._last_compiled_kernel
+        if not kernel:
+            return
+        print(
+            f"{tag} best-effort submit_kernel from last successful "
+            f"{'correctness' if self._last_correct_kernel else 'compile'} …",
+            flush=True,
+        )
+        self._total_tool_calls += 1
+        tool_result = self._execute_tool(submit_tool, {"kernel_code": kernel})
+        finalized = self._finalize_from_submit_result(tool_result)
+        trajectory.add_turn(
+            KernelTurn(
+                turn_id=len(trajectory.turns),
+                messages_in=[],
+                response=[],
+                tool_calls=[
+                    ToolCall(
+                        tool_name="submit_kernel",
+                        args={"kernel_code": kernel},
+                        result_text=tool_result.output,
+                        success=tool_result.success,
+                        metadata=tool_result.metadata,
+                    )
+                ],
+                feedback_to_model="",
+                llm_latency_s=0.0,
+                is_final=finalized,
+                submitted_kernel=kernel if finalized else None,
+            )
+        )
 
     def _install_autosave(self, trajectory: KernelTrajectory) -> None:
         """Wrap trajectory.add_turn / finish so they flush to save_path after
@@ -310,6 +419,7 @@ class KernelAgent:
             except Exception as e:
                 print(f"[Agent] initial save failed: {e}", flush=True)
         self._endpoint_progress_cursor = 0
+        self._reset_kernel_tracking()
 
         instructions = build_system_prompt(
             max_turns=self.max_turns,
@@ -349,6 +459,14 @@ class KernelAgent:
             turns_remaining = self.max_turns - turn_idx
             tool_calls_remaining = self.max_tool_calls - self._total_tool_calls
 
+            if turns_remaining == 1:
+                input_items.append(
+                    {
+                        "role": "user",
+                        "content": build_final_turn_mandatory_submit_message(),
+                    }
+                )
+
             if turns_remaining <= self.warn_turns_remaining and turn_idx > 0:
                 input_items.append(
                     {
@@ -360,49 +478,96 @@ class KernelAgent:
                     }
                 )
 
+            if self.tool_output_context_max_chars > 0:
+                compact_responses_input_items(
+                    input_items,
+                    tool_output_max_chars=self.tool_output_context_max_chars,
+                )
+
             # Snapshot the input we're about to send so the trajectory can
             # replay this exact turn. Deep-copy via json round-trip so later
             # mutations of input_items don't leak in.
             messages_in_snapshot = json.loads(json.dumps(input_items))
 
-            # --- LLM call ---
-            t0 = time.time()
-            try:
-                create_kwargs: dict[str, Any] = {
-                    "model": self.model,
-                    "instructions": instructions,
-                    "input": input_items,
-                    "tools": tool_schemas,
+            # --- LLM call (retry transient failures) ---
+            create_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "instructions": instructions,
+                "input": input_items,
+                "tools": tool_schemas,
+            }
+            if self.reasoning_effort is not None:
+                create_kwargs["reasoning"] = {
+                    "effort": self.reasoning_effort,
+                    "summary": "auto",
                 }
-                if self.reasoning_effort is not None:
-                    create_kwargs["reasoning"] = {
-                        "effort": self.reasoning_effort,
-                        "summary": "auto",
-                    }
-                else:
-                    create_kwargs["reasoning"] = {"summary": "auto"}
+            else:
+                create_kwargs["reasoning"] = {"summary": "auto"}
+            if self.max_turns == 1:
+                create_kwargs["tool_choice"] = "required"
 
-                response = self.client.responses.create(**create_kwargs)
-            except Exception as e:
-                err_msg = f"{type(e).__name__}: {e}"
-                tb = traceback.format_exc()
-                print(
-                    f"[Agent] LLM call FAILED on turn {turn_idx} "
-                    f"(problem {self.problem_id}, level {self.level}):\n"
-                    f"{err_msg}\n{tb}"
-                )
-                failed_turn = KernelTurn(
-                    turn_id=turn_idx,
-                    messages_in=messages_in_snapshot,
-                    response=[],
-                    feedback_to_model=f"LLM call failed: {err_msg}",
-                    llm_latency_s=time.time() - t0,
-                    is_final=False,
-                )
-                trajectory.add_turn(failed_turn)
-                trajectory.finish(self._final_result)
-                return trajectory
-            llm_latency = time.time() - t0
+            response = None
+            llm_latency = 0.0
+            for attempt in range(self.llm_error_retries):
+                t0 = time.time()
+                try:
+                    with self._llm_acquire():
+                        try:
+                            response = self.client.responses.create(**create_kwargs)
+                        except TypeError:
+                            if "tool_choice" in create_kwargs:
+                                create_kwargs.pop("tool_choice", None)
+                                response = self.client.responses.create(
+                                    **create_kwargs
+                                )
+                            else:
+                                raise
+                    llm_latency = time.time() - t0
+                    break
+                except Exception as e:
+                    llm_latency = time.time() - t0
+                    err_s = f"{type(e).__name__}: {e}"
+                    if is_requested_tokens_zero(err_s):
+                        print(
+                            f"{tag} LLM error suggests bad request token accounting "
+                            f"(Requested tokens: 0). Payload diagnostics:",
+                            flush=True,
+                        )
+                        log_trimmed_create_kwargs_diagnostics(tag, create_kwargs)
+                    if attempt + 1 >= self.llm_error_retries:
+                        err_msg = err_s
+                        tb = traceback.format_exc()
+                        print(
+                            f"{tag} LLM call FAILED after "
+                            f"{self.llm_error_retries} attempt(s) on turn "
+                            f"{turn_idx} (problem {self.problem_id}, "
+                            f"level {self.level}):\n"
+                            f"{err_msg}\n{tb}",
+                            flush=True,
+                        )
+                        failed_turn = KernelTurn(
+                            turn_id=turn_idx,
+                            messages_in=messages_in_snapshot,
+                            response=[],
+                            feedback_to_model=f"LLM call failed: {err_msg}",
+                            llm_latency_s=llm_latency,
+                            is_final=False,
+                        )
+                        trajectory.add_turn(failed_turn)
+                        trajectory.finish(self._final_result)
+                        return trajectory
+                    delay = llm_retry_delay_s(attempt, e)
+                    print(
+                        f"{tag} LLM error (attempt {attempt + 1}/"
+                        f"{self.llm_error_retries}): {err_s or repr(e)}; "
+                        f"retrying in {delay:.1f}s",
+                        flush=True,
+                    )
+                    time.sleep(delay)
+
+            assert response is not None  # loop exits via return if all fail
+
+            turn_usage = llm_usage_to_dict(getattr(response, "usage", None))
 
             # Always-on per-turn line so users can see progress in long runs.
             n_fc = sum(
@@ -457,22 +622,77 @@ class KernelAgent:
             submitted_kernel: str | None = None
 
             if not function_calls:
-                # Model produced no tool calls. It either finished (unusual
-                # without submit_kernel) or is stalling. Record the turn and
-                # end the loop — there's nothing to act on.
-                turn = KernelTurn(
-                    turn_id=turn_idx,
-                    messages_in=messages_in_snapshot,
-                    response=response_items,
-                    tool_calls=[],
-                    feedback_to_model="",
-                    llm_latency_s=llm_latency,
-                    is_final=False,
+                if turn_idx >= self.max_turns - 1:
+                    fb_kernel = (
+                        extract_modelnew_from_response_items(response_items)
+                        or self._last_correct_kernel
+                        or self._last_compiled_kernel
+                    )
+                    executed_fb: list[ToolCall] = []
+                    is_final_fb = False
+                    submitted_fb: str | None = None
+                    if fb_kernel and "submit_kernel" in self.tool_map:
+                        print(
+                            f"{tag} turn {turn_idx + 1}: no tool calls — "
+                            f"fallback submit_kernel (ModelNew guard) …",
+                            flush=True,
+                        )
+                        self._total_tool_calls += 1
+                        tr = self._execute_tool(
+                            self.tool_map["submit_kernel"],
+                            {"kernel_code": fb_kernel},
+                        )
+                        is_final_fb = self._finalize_from_submit_result(tr)
+                        submitted_fb = fb_kernel if is_final_fb else None
+                        executed_fb.append(
+                            ToolCall(
+                                tool_name="submit_kernel",
+                                args={"kernel_code": fb_kernel},
+                                result_text=tr.output,
+                                success=tr.success,
+                                metadata=tr.metadata,
+                            )
+                        )
+                    trajectory.add_turn(
+                        KernelTurn(
+                            turn_id=turn_idx,
+                            messages_in=messages_in_snapshot,
+                            response=response_items,
+                            tool_calls=executed_fb,
+                            feedback_to_model="",
+                            llm_latency_s=llm_latency,
+                            is_final=is_final_fb,
+                            submitted_kernel=submitted_fb,
+                            llm_usage=turn_usage,
+                        )
+                    )
+                    if is_final_fb and self.verbose:
+                        print(
+                            f"[Agent] Final submission on turn {turn_idx} "
+                            f"(no-tools fallback).",
+                            flush=True,
+                        )
+                    break
+                trajectory.add_turn(
+                    KernelTurn(
+                        turn_id=turn_idx,
+                        messages_in=messages_in_snapshot,
+                        response=response_items,
+                        tool_calls=[],
+                        feedback_to_model="",
+                        llm_latency_s=llm_latency,
+                        is_final=False,
+                        llm_usage=turn_usage,
+                    )
                 )
-                trajectory.add_turn(turn)
-                if self.verbose:
-                    print("[Agent] No tool calls in response — ending loop.")
-                break
+                input_items.append(
+                    {"role": "user", "content": build_no_tool_calls_nudge()}
+                )
+                print(
+                    f"{tag} turn {turn_idx + 1}: no tool calls — nudging",
+                    flush=True,
+                )
+                continue
 
             for fc in function_calls:
                 # Enforce the total tool-call budget. We still need to reply
@@ -588,6 +808,7 @@ class KernelAgent:
                         metadata=tool_result.metadata,
                     )
                 )
+                self._note_kernel_progress(tool_name, args, tool_result)
 
                 # submit_kernel finalizes the run, but only if it returned a
                 # real KernelExecResult. Transient errors (e.g. lock file
@@ -616,6 +837,7 @@ class KernelAgent:
                 llm_latency_s=llm_latency,
                 is_final=is_final,
                 submitted_kernel=submitted_kernel,
+                llm_usage=turn_usage,
             )
             trajectory.add_turn(turn)
 
@@ -624,6 +846,7 @@ class KernelAgent:
                     print(f"[Agent] Final submission on turn {turn_idx}.")
                 break
 
+        self._best_effort_autofinalize_after_loop(trajectory, tag)
         trajectory.finish(self._final_result)
         return trajectory
 
@@ -664,26 +887,27 @@ class KernelAgent:
         turn_idx: int,
         executed_tool_calls: list[ToolCall],
     ) -> tuple[bool, str | None]:
-        """On the last turn, auto-submit a kernel that just passed correctness.
+        """On the last turn, auto-submit after successful compile or correctness.
 
-        This is a harness-side safety net for runs that spend their final tool
-        call on `run_correctness` and would otherwise finish as `error` despite
-        already having a correct kernel in hand.
+        Avoids `error` when the model runs out of turns right after a good
+        compile_kernel or run_correctness without calling submit_kernel.
         """
         if turn_idx != self.max_turns - 1 or not executed_tool_calls:
             return False, None
 
         last_call = executed_tool_calls[-1]
+        meta = last_call.metadata or {}
+        kernel_code = last_call.args.get("kernel_code")
         if (
-            last_call.tool_name != "run_correctness"
-            or not last_call.success
-            or not (last_call.metadata or {}).get("compiled")
-            or not (last_call.metadata or {}).get("correctness")
+            not last_call.success
+            or not isinstance(kernel_code, str)
+            or not kernel_code
+            or not meta.get("compiled")
         ):
             return False, None
-
-        kernel_code = last_call.args.get("kernel_code")
-        if not isinstance(kernel_code, str) or not kernel_code:
+        if last_call.tool_name == "run_correctness" and not meta.get("correctness"):
+            return False, None
+        if last_call.tool_name not in ("run_correctness", "compile_kernel"):
             return False, None
 
         submit_tool = self.tool_map.get("submit_kernel")
@@ -752,6 +976,7 @@ class KernelAgent:
             except Exception as e:
                 print(f"[Agent] initial save failed: {e}", flush=True)
         self._endpoint_progress_cursor = 0
+        self._reset_kernel_tracking()
 
         instructions = build_system_prompt(
             max_turns=self.max_turns,
@@ -796,6 +1021,15 @@ class KernelAgent:
 
             turns_remaining = self.max_turns - turn_idx
             tool_calls_remaining = self.max_tool_calls - self._total_tool_calls
+
+            if turns_remaining == 1:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": build_final_turn_mandatory_submit_message(),
+                    }
+                )
+
             if turns_remaining <= self.warn_turns_remaining and turn_idx > 0:
                 messages.append(
                     {
@@ -807,57 +1041,98 @@ class KernelAgent:
                     }
                 )
 
+            if self.tool_output_context_max_chars > 0:
+                compact_chat_tool_messages(
+                    messages,
+                    tool_output_max_chars=self.tool_output_context_max_chars,
+                )
+            if self.chat_context_tail_messages is not None:
+                maybe_sliding_window_chat(
+                    messages,
+                    keep_tail=self.chat_context_tail_messages,
+                )
+
             messages_in_snapshot = json.loads(json.dumps(messages))
 
-            t0 = time.time()
-            try:
-                create_kwargs: dict[str, Any] = {
-                    "model": self.model,
-                    "messages": messages,
-                    "tools": tool_schemas,
-                    "tool_choice": "auto",
-                }
-                # Annotate every chat-completion call with run metadata so
-                # endpoint-side adapters (e.g. aeproxy) can write progress
-                # files into the trajectory dir and the website can render
-                # per-candidate detail. Servers that don't recognize the
-                # field ignore it.
-                if self.save_path:
-                    create_kwargs["extra_body"] = {
-                        "popcornbench_run_meta": {
-                            "run_name": self.run_name,
-                            "level": self.level,
-                            "problem_id": self.problem_id,
-                            "model": self.model,
-                            "turn_id": turn_idx,
-                            "trajectory_dir": os.path.dirname(self.save_path),
-                            "trajectory_basename": os.path.splitext(
-                                os.path.basename(self.save_path)
-                            )[0],
-                        }
+            create_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": messages,
+                "tools": tool_schemas,
+                "tool_choice": "required" if self.max_turns == 1 else "auto",
+            }
+            if self.save_path:
+                create_kwargs["extra_body"] = {
+                    "popcornbench_run_meta": {
+                        "run_name": self.run_name,
+                        "level": self.level,
+                        "problem_id": self.problem_id,
+                        "model": self.model,
+                        "turn_id": turn_idx,
+                        "trajectory_dir": os.path.dirname(self.save_path),
+                        "trajectory_basename": os.path.splitext(
+                            os.path.basename(self.save_path)
+                        )[0],
                     }
-                response = self.client.chat.completions.create(**create_kwargs)
-            except Exception as e:
-                err_msg = f"{type(e).__name__}: {e}"
-                tb = traceback.format_exc()
-                print(
-                    f"[Agent/chat] LLM call FAILED on turn {turn_idx} "
-                    f"(problem {self.problem_id}, level {self.level}):\n"
-                    f"{err_msg}\n{tb}"
-                )
-                trajectory.add_turn(
-                    KernelTurn(
-                        turn_id=turn_idx,
-                        messages_in=messages_in_snapshot,
-                        response=[],
-                        feedback_to_model=f"LLM call failed: {err_msg}",
-                        llm_latency_s=time.time() - t0,
-                        is_final=False,
+                }
+
+            response = None
+            llm_latency = 0.0
+            for attempt in range(self.llm_error_retries):
+                t0 = time.time()
+                try:
+                    with self._llm_acquire():
+                        response = self.client.chat.completions.create(**create_kwargs)
+                    if not response.choices:
+                        raise ValueError("chat completion returned no choices")
+                    _chk = response.choices[0].message
+                    if _chk is None:
+                        raise ValueError("chat completion choice has no message")
+                    llm_latency = time.time() - t0
+                    break
+                except Exception as e:
+                    llm_latency = time.time() - t0
+                    err_s = f"{type(e).__name__}: {e}"
+                    if is_requested_tokens_zero(err_s):
+                        print(
+                            f"{tag} chat LLM error suggests bad request token "
+                            f"accounting (Requested tokens: 0). Payload diagnostics:",
+                            flush=True,
+                        )
+                        log_trimmed_create_kwargs_diagnostics(tag, create_kwargs)
+                    if attempt + 1 >= self.llm_error_retries:
+                        err_msg = err_s
+                        tb = traceback.format_exc()
+                        print(
+                            f"{tag} chat LLM FAILED after "
+                            f"{self.llm_error_retries} attempt(s) on turn "
+                            f"{turn_idx} (problem {self.problem_id}, "
+                            f"level {self.level}):\n"
+                            f"{err_msg}\n{tb}",
+                            flush=True,
+                        )
+                        trajectory.add_turn(
+                            KernelTurn(
+                                turn_id=turn_idx,
+                                messages_in=messages_in_snapshot,
+                                response=[],
+                                feedback_to_model=f"LLM call failed: {err_msg}",
+                                llm_latency_s=llm_latency,
+                                is_final=False,
+                            )
+                        )
+                        trajectory.finish(self._final_result)
+                        return trajectory
+                    delay = llm_retry_delay_s(attempt, e)
+                    print(
+                        f"{tag} chat LLM error (attempt {attempt + 1}/"
+                        f"{self.llm_error_retries}): {err_s or repr(e)}; "
+                        f"retrying in {delay:.1f}s",
+                        flush=True,
                     )
-                )
-                trajectory.finish(self._final_result)
-                return trajectory
-            llm_latency = time.time() - t0
+                    time.sleep(delay)
+
+            assert response is not None
+            turn_usage = llm_usage_to_dict(getattr(response, "usage", None))
             _n_fc_chat = len(response.choices[0].message.tool_calls or [])
             print(
                 f"{tag} turn {turn_idx + 1} LLM done in {llm_latency:.1f}s "
@@ -867,6 +1142,7 @@ class KernelAgent:
 
             choice = response.choices[0]
             asst = choice.message
+            assert asst is not None
             asst_content = asst.content or ""
             reasoning = getattr(asst, "reasoning_content", None) or ""
             raw_tool_calls = list(asst.tool_calls or [])
@@ -909,6 +1185,12 @@ class KernelAgent:
             # report doesn't have to know about both API shapes).
             response_items: list[dict[str, Any]] = []
             if reasoning:
+                if self.reasoning_context_max_chars > 0:
+                    reasoning = truncate_context_str(
+                        reasoning,
+                        self.reasoning_context_max_chars,
+                        "reasoning",
+                    )
                 response_items.append(
                     {"type": "reasoning", "summary": [{"text": reasoning}]}
                 )
@@ -940,6 +1222,57 @@ class KernelAgent:
             submitted_kernel: str | None = None
 
             if not raw_tool_calls:
+                if turn_idx >= self.max_turns - 1:
+                    fb_kernel = (
+                        extract_modelnew_kernel_from_text(asst_content)
+                        or self._last_correct_kernel
+                        or self._last_compiled_kernel
+                    )
+                    executed_fb: list[ToolCall] = []
+                    is_final_fb = False
+                    submitted_fb: str | None = None
+                    if fb_kernel and "submit_kernel" in self.tool_map:
+                        print(
+                            f"{tag} turn {turn_idx + 1}: no tool calls — "
+                            f"fallback submit_kernel (ModelNew guard) …",
+                            flush=True,
+                        )
+                        self._total_tool_calls += 1
+                        tr = self._execute_tool(
+                            self.tool_map["submit_kernel"],
+                            {"kernel_code": fb_kernel},
+                        )
+                        is_final_fb = self._finalize_from_submit_result(tr)
+                        submitted_fb = fb_kernel if is_final_fb else None
+                        executed_fb.append(
+                            ToolCall(
+                                tool_name="submit_kernel",
+                                args={"kernel_code": fb_kernel},
+                                result_text=tr.output,
+                                success=tr.success,
+                                metadata=tr.metadata,
+                            )
+                        )
+                    trajectory.add_turn(
+                        KernelTurn(
+                            turn_id=turn_idx,
+                            messages_in=messages_in_snapshot,
+                            response=response_items,
+                            tool_calls=executed_fb,
+                            feedback_to_model="",
+                            llm_latency_s=llm_latency,
+                            is_final=is_final_fb,
+                            submitted_kernel=submitted_fb,
+                            llm_usage=turn_usage,
+                        )
+                    )
+                    if is_final_fb and self.verbose:
+                        print(
+                            f"[Agent/chat] Final submission on turn {turn_idx} "
+                            f"(no-tools fallback).",
+                            flush=True,
+                        )
+                    break
                 trajectory.add_turn(
                     KernelTurn(
                         turn_id=turn_idx,
@@ -949,11 +1282,17 @@ class KernelAgent:
                         feedback_to_model="",
                         llm_latency_s=llm_latency,
                         is_final=False,
+                        llm_usage=turn_usage,
                     )
                 )
-                if self.verbose:
-                    print("[Agent/chat] No tool calls — ending loop.")
-                break
+                messages.append(
+                    {"role": "user", "content": build_no_tool_calls_nudge()}
+                )
+                print(
+                    f"{tag} turn {turn_idx + 1}: no tool calls — nudging",
+                    flush=True,
+                )
+                continue
 
             for tc in raw_tool_calls:
                 tool_name = tc.function.name or ""
@@ -1048,6 +1387,7 @@ class KernelAgent:
                         metadata=tool_result.metadata,
                     )
                 )
+                self._note_kernel_progress(tool_name, args, tool_result)
 
                 if tool_name == "submit_kernel":
                     submitted_kernel = args.get("kernel_code")
@@ -1073,6 +1413,7 @@ class KernelAgent:
                     llm_latency_s=llm_latency,
                     is_final=is_final,
                     submitted_kernel=submitted_kernel,
+                    llm_usage=turn_usage,
                 )
             )
 
@@ -1081,5 +1422,6 @@ class KernelAgent:
                     print(f"[Agent/chat] Final submission on turn {turn_idx}.")
                 break
 
+        self._best_effort_autofinalize_after_loop(trajectory, tag)
         trajectory.finish(self._final_result)
         return trajectory

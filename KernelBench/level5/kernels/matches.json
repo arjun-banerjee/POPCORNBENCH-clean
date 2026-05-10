@@ -1,1 +1,55 @@
-[{"14": "48"}, {"48": "52"}, {"24": "57"}, {"39": "53"}, {"44": "77"}, {"5": "56"}, {"8": "55"}]
+{
+  "description": "Merged A100↔H100 Cutlass example pairs: one problem_id per row; CUDA files use NN_<stem> in kernels/a100 and kernels/h100. Legacy keys are pre-rename CUTLASS example directory names. The old {48:52} entry was a typo for {36:52} (gather/scatter). Problems 29 (multi GEMM IR) and 30 (Blackwell FMHA) stay separate benchmarks but are linked as source/target.",
+  "pairs": [
+    {
+      "problem_id": 22,
+      "stem": "ampere_tf32_tensorop_gemm",
+      "a100_legacy": "14_ampere_tf32_tensorop_gemm",
+      "h100_legacy": "48_hopper_warp_specialized_gemm"
+    },
+    {
+      "problem_id": 23,
+      "stem": "gather_scatter_fusion",
+      "a100_legacy": "36_gather_scatter_fusion",
+      "h100_legacy": "52_hopper_gather_scatter_fusion"
+    },
+    {
+      "problem_id": 25,
+      "stem": "gemm_grouped",
+      "a100_legacy": "24_gemm_grouped",
+      "h100_legacy": "57_hopper_grouped_gemm"
+    },
+    {
+      "problem_id": 26,
+      "stem": "gemm_permute",
+      "a100_legacy": "39_gemm_permute",
+      "h100_legacy": "53_hopper_gemm_permute"
+    },
+    {
+      "problem_id": 27,
+      "stem": "batched_gemm",
+      "a100_legacy": "05_batched_gemm",
+      "h100_legacy": "56_hopper_ptr_array_batched_gemm"
+    },
+    {
+      "problem_id": 28,
+      "stem": "turing_tensorop_gemm",
+      "a100_legacy": "08_turing_tensorop_gemm",
+      "h100_legacy": "55_hopper_mixed_dtype_gemm"
+    },
+    {
+      "problem_id": 29,
+      "stem": "multi_gemm_ir_and_codegen",
+      "a100_legacy": "44_multi_gemm_ir_and_codegen",
+      "h100_legacy": null,
+      "paired_target_problem_id": 30
+    },
+    {
+      "problem_id": 30,
+      "stem": "blackwell_fmha",
+      "a100_legacy": "44_multi_gemm_ir_and_codegen",
+      "h100_legacy": "77_blackwell_fmha",
+      "paired_source_problem_id": 29
+    }
+  ]
+}

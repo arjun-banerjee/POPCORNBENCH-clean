@@ -73,6 +73,8 @@ class KernelTurn:
     is_final: bool = False
     # The submitted kernel source at submission time, if any.
     submitted_kernel: str | None = None
+    # Token usage for this turn's LLM call (from API via SDK), if available.
+    llm_usage: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +119,18 @@ class KernelTrajectory:
         "unknown"  # "correct" | "incorrect" | "compile_fail" | "timeout" | "error"
     )
 
+    # Sum of per-turn LLM usage (filled in ``finish()``).
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
+    llm_total_tokens: int = 0
+
     # ---------------------------------------------------------------------------
 
     def add_turn(self, turn: KernelTurn) -> None:
         self.turns.append(turn)
         self.total_turns = len(self.turns)
         self.total_tool_calls = sum(len(t.tool_calls) for t in self.turns)
+        self._recompute_llm_usage_totals()
 
     def finish(self, result: KernelExecResult | None) -> None:
         """Call when the agent run is complete."""
@@ -130,6 +138,7 @@ class KernelTrajectory:
         self.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self.total_turns = len(self.turns)
         self.total_tool_calls = sum(len(t.tool_calls) for t in self.turns)
+        self._recompute_llm_usage_totals()
 
         if result is None:
             self.outcome = "error"
@@ -139,6 +148,36 @@ class KernelTrajectory:
             self.outcome = "incorrect"
         else:
             self.outcome = "correct"
+
+    def _recompute_llm_usage_totals(self) -> None:
+        """Aggregate ``llm_usage`` across turns (best-effort across API shapes)."""
+        ti = to = tt = 0
+        for turn in self.turns:
+            u = turn.llm_usage
+            if not u:
+                continue
+
+            def _int0(*keys: str) -> int:
+                for k in keys:
+                    v = u.get(k)
+                    if v is not None:
+                        try:
+                            return int(v)
+                        except (TypeError, ValueError):
+                            pass
+                return 0
+
+            inp = _int0("input_tokens", "prompt_tokens")
+            out = _int0("output_tokens", "completion_tokens")
+            tot = _int0("total_tokens")
+            if tot == 0 and (inp or out):
+                tot = inp + out
+            ti += inp
+            to += out
+            tt += tot
+        self.llm_input_tokens = ti
+        self.llm_output_tokens = to
+        self.llm_total_tokens = tt
 
     # ---------------------------------------------------------------------------
     # Serialization
@@ -172,6 +211,9 @@ class KernelTrajectory:
             "finished_at": self.finished_at,
             "total_turns": self.total_turns,
             "total_tool_calls": self.total_tool_calls,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
+            "llm_total_tokens": self.llm_total_tokens,
             "outcome": self.outcome,
             "final_result": _coerce(
                 self.final_result.model_dump() if self.final_result else None
@@ -185,6 +227,7 @@ class KernelTrajectory:
                     "llm_latency_s": t.llm_latency_s,
                     "is_final": t.is_final,
                     "submitted_kernel": t.submitted_kernel,
+                    "llm_usage": _coerce(t.llm_usage),
                     "tool_calls": [
                         {
                             "tool_name": tc.tool_name,

@@ -270,6 +270,7 @@ def run_one(
     perf_lock,
     eval_request_q=None,
     eval_response_q=None,
+    llm_global_sem=None,
 ) -> Optional[dict]:
     """Run a single (model, level, problem) work item.
 
@@ -435,11 +436,24 @@ def run_one(
                 or agent_cfg.get("reasoning_effort"),
                 warn_turns_remaining=agent_cfg.get("warn_turns_remaining", 2),
                 turn_delay_s=float(agent_cfg.get("turn_delay_s", 0.0)),
+                llm_error_retries=int(agent_cfg.get("llm_error_retries", 3)),
                 verbose=False,
                 api_kind=api_kind,
                 save_path=traj_path,
                 eval_client=eval_client,
                 initial_message=initial_message,
+                tool_output_context_max_chars=int(
+                    agent_cfg.get("tool_output_context_max_chars", 120_000)
+                ),
+                reasoning_context_max_chars=int(
+                    agent_cfg.get("reasoning_context_max_chars", 16_000)
+                ),
+                chat_context_tail_messages=(
+                    int(agent_cfg["chat_context_tail_messages"])
+                    if agent_cfg.get("chat_context_tail_messages") is not None
+                    else None
+                ),
+                llm_concurrency_semaphore=llm_global_sem,
             )
 
             # Lock fallback: when the eval queue is NOT in use (e.g. legacy
@@ -502,6 +516,9 @@ def _summary_from_dict(d: dict, level: int, model_name: str, variant: str = "") 
         "outcome": d.get("outcome"),
         "total_turns": d.get("total_turns"),
         "total_tool_calls": d.get("total_tool_calls"),
+        "llm_input_tokens": d.get("llm_input_tokens", 0),
+        "llm_output_tokens": d.get("llm_output_tokens", 0),
+        "llm_total_tokens": d.get("llm_total_tokens", 0),
         "compiled": fr.get("compiled", False),
         "correctness": fr.get("correctness", False),
         "runtime": fr.get("runtime", -1.0),
@@ -530,6 +547,9 @@ def _write_skip_marker(path, work, model_name, run_cfg, agent_cfg, msg):
                 "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "total_turns": 0,
                 "total_tool_calls": 0,
+                "llm_input_tokens": 0,
+                "llm_output_tokens": 0,
+                "llm_total_tokens": 0,
                 "outcome": "skipped",
                 "skip_reason": msg,
                 "final_result": None,
@@ -760,6 +780,15 @@ def main():
         per_model_sems.append(manager.Semaphore(cap))
         print(f"  [{m['name']}] per-model concurrency cap = {cap}")
 
+    llm_global_sem = None
+    _lgc = int(par_cfg.get("llm_global_concurrency", 0) or 0)
+    if _lgc > 0:
+        llm_global_sem = manager.Semaphore(_lgc)
+        print(
+            f"[run_sweep] llm_global_concurrency={_lgc} "
+            f"(extra serialization around each LLM HTTP call)"
+        )
+
     # Per-GPU FIFO eval queues + dedicated eval-server processes.
     # ----------------------------------------------------------------
     # Each GPU gets one Manager().Queue() that all agents pinned to that GPU
@@ -940,6 +969,7 @@ def main():
                     perf_locks[w.device_id],
                     eval_request_qs[w.device_id],
                     eval_response_qs[i],
+                    llm_global_sem,
                 ): w
                 for i, w in enumerate(work_items)
             }
