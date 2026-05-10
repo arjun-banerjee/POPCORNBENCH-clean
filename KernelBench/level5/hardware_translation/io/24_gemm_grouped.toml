@@ -1,0 +1,24 @@
+contract = """
+# I/O contract only - implement ModelNew with custom CUDA for the target GPU.
+# Use ``torch.utils.cpp_extension.load_inline`` (or equivalent) for device code.
+
+
+import torch
+import torch.nn as nn
+
+GROUPS = 15
+M = 256
+N = 256
+K = 256
+ALPHA = 1.0
+BETA = 0.0
+
+def get_inputs():
+    return [torch.randn(GROUPS, M, K, dtype=torch.float32).cuda()]
+
+def get_init_inputs():
+    return [GROUPS, K, N, ALPHA, BETA]
+
+# ModelNew must define __init__(*get_init_inputs()) and forward(*get_inputs()) so outputs match the hidden reference implementation on the evaluation GPU.
+"""
+
