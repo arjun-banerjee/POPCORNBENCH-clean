@@ -123,62 +123,77 @@ def log_trimmed_create_kwargs_diagnostics(tag: str, payload: dict[str, Any]) -> 
         print(f"{tag} LLM request diagnostics: could not serialize payload: {e}", flush=True)
 
 
-def truncate_context_str(s: str, max_chars: int, label: str) -> str:
+def truncate_context_str(s: str, max_chars: int, label: str) -> tuple[str, bool]:
     if max_chars <= 0 or len(s) <= max_chars:
-        return s
+        return s, False
     omit = len(s) - max_chars + 120
     half = max_chars // 2
-    return (
+    text = (
         f"{label} (truncated {omit} chars): "
         f"{s[:half]}\n...[ omitted {omit} characters ]...\n{s[-half:]}"
     )
+    return text, True
 
 
 def compact_responses_input_items(
     items: list[dict[str, Any]],
     *,
     tool_output_max_chars: int,
-) -> None:
+) -> bool:
     """Truncate tool outputs in Responses-API `input` items.
 
     Reasoning items are left unchanged so reasoning-capable models still receive
     verbatim chains required by the API.
+    Returns True if any tool output text was shortened.
     """
+    any_truncated = False
     for it in items:
         if it.get("type") != "function_call_output":
             continue
         out = it.get("output")
         if isinstance(out, str):
-            it["output"] = truncate_context_str(
+            new_out, truncated = truncate_context_str(
                 out, tool_output_max_chars, "tool_output"
             )
+            it["output"] = new_out
+            any_truncated = any_truncated or truncated
+    return any_truncated
 
 
 def compact_chat_tool_messages(
     messages: list[dict[str, Any]],
     *,
     tool_output_max_chars: int,
-) -> None:
+) -> bool:
+    """Truncate role=tool chat messages. Returns True if anything was shortened."""
+    any_truncated = False
     for m in messages:
         if m.get("role") != "tool":
             continue
         c = m.get("content")
         if isinstance(c, str):
-            m["content"] = truncate_context_str(c, tool_output_max_chars, "tool_output")
+            new_c, truncated = truncate_context_str(
+                c, tool_output_max_chars, "tool_output"
+            )
+            m["content"] = new_c
+            any_truncated = any_truncated or truncated
+    return any_truncated
 
 
 def maybe_sliding_window_chat(
     messages: list[dict[str, Any]],
     *,
     keep_tail: int,
-) -> None:
+) -> bool:
     """Keep system + first user message + placeholder + last `keep_tail` messages.
 
     May break API invariants if the cut splits an assistant/tool batch; callers
     should use a large enough `keep_tail` that recent complete turns remain.
+
+    Returns True if messages were mutated to drop older context.
     """
     if keep_tail <= 0 or len(messages) <= 2 + keep_tail:
-        return
+        return False
     head = messages[:2]
     tail = messages[-keep_tail:]
     placeholder = {
@@ -190,6 +205,7 @@ def maybe_sliding_window_chat(
     }
     messages.clear()
     messages.extend(head + [placeholder] + tail)
+    return True
 
 
 _CODE_FENCE_RE = re.compile(

@@ -264,6 +264,8 @@ def _summary_from_dict(d: dict, level: int) -> dict:
         "llm_input_tokens": d.get("llm_input_tokens", 0),
         "llm_output_tokens": d.get("llm_output_tokens", 0),
         "llm_total_tokens": d.get("llm_total_tokens", 0),
+        "agent_wall_clock_s": d.get("agent_wall_clock_s"),
+        "truncation_occurred": d.get("truncation_occurred", False),
         "compiled": fr.get("compiled", False),
         "correctness": fr.get("correctness", False),
         "runtime": fr.get("runtime", -1.0),

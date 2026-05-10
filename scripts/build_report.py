@@ -285,6 +285,9 @@ header .page-wrap { padding-top: 36px; padding-bottom: 24px; }
   font-size: 12px; opacity: 0.7; margin-bottom: 8px;
 }
 .turn-head .turn-id { font-size: 13px; opacity: 1; }
+.turn-head .turn-tokens {
+  opacity: 0.9; white-space: normal; font-variant-numeric: tabular-nums;
+}
 
 details { margin: 6px 0; }
 details > summary {
@@ -900,6 +903,43 @@ def _render_tier_picker(d: dict, current_run: str,
     )
 
 
+def _turn_llm_usage_label(t: dict) -> str:
+    """Human-readable LLM usage for one turn from saved ``llm_usage`` dict.
+
+    Matches trajectory aggregation semantics: supports Responses API
+    (input_tokens/output_tokens/total_tokens) and Chat Completion
+    (prompt_tokens/completion_tokens/total_tokens). Returns \"\" if absent.
+    """
+    u = t.get("llm_usage")
+    if not isinstance(u, dict) or not u:
+        return ""
+
+    def _i0(*keys: str) -> int:
+        for k in keys:
+            v = u.get(k)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    pass
+        return 0
+
+    inp = _i0("input_tokens", "prompt_tokens")
+    out = _i0("output_tokens", "completion_tokens")
+    tot = _i0("total_tokens")
+    if tot == 0 and (inp or out):
+        tot = inp + out
+
+    bits: list[str] = []
+    if inp > 0:
+        bits.append(f"in={inp:,}")
+    if out > 0:
+        bits.append(f"out={out:,}")
+    if tot > 0:
+        bits.append(f"total={tot:,}")
+    return "tokens " + " · ".join(bits) if bits else ""
+
+
 def _render_trajectory(d: dict, run_name: str, generated_at: str,
                        by_variant: dict[str, list[dict]] | None = None,
                        sibling_tiers: dict[str, str] | None = None) -> str:
@@ -908,6 +948,10 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
     sp_str = f"{sp:.2f}x" if sp is not None else "—"
     rt = fr.get("runtime", -1)
     rt_str = f"{rt:.2f} μs" if rt and rt > 0 else "—"
+    wall_raw = d.get("agent_wall_clock_s")
+    wall_str = (
+        f"{float(wall_raw):.1f}s" if isinstance(wall_raw, (int, float)) else "—"
+    )
 
     tldr = f"""<div class="tldr">
 <div class="card-row">
@@ -918,6 +962,9 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
   <div class="tldr-cell"><div class="l">model</div><div class="v">{html.escape(d.get('model_name',''))}</div></div>
   <div class="tldr-cell"><div class="l">turns / max</div><div class="v">{d.get('total_turns',0)} / {d.get('max_turns','?')}</div></div>
   <div class="tldr-cell"><div class="l">tool calls</div><div class="v">{d.get('total_tool_calls',0)}</div></div>
+  <div class="tldr-cell"><div class="l">tokens (total)</div><div class="v">{d.get('llm_total_tokens', 0)}</div></div>
+  <div class="tldr-cell"><div class="l">wall clock</div><div class="v">{wall_str}</div></div>
+  <div class="tldr-cell"><div class="l">truncated</div><div class="v">{'yes' if (d.get('truncation_occurred') or d.get('chat_history_window_truncated')) else 'no'}</div></div>
   <div class="tldr-cell"><div class="l">backend</div><div class="v">{html.escape(d.get('backend',''))} {html.escape(d.get('precision',''))}</div></div>
   <div class="tldr-cell"><div class="l">variant</div><div class="v">{html.escape(d.get('_variant','default'))}</div></div>
   <div class="tldr-cell"><div class="l">runtime</div><div class="v">{rt_str}</div></div>
@@ -955,10 +1002,13 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
             tid = t.get("turn_id", "?")
             n_calls = len(t.get("tool_calls") or [])
             tag = "FINAL · " if t.get("is_final") else ""
+            usage_s = _turn_llm_usage_label(t)
+            usage_bit = f" · {html.escape(usage_s)}" if usage_s else ""
             turns_html.append(
                 f'<details class="turn-collapse"><summary>'
                 f'<b>turn {tid}</b> · {tag}{n_calls} tool call(s) · '
-                f'{t.get("llm_latency_s",0):.1f}s · '
+                f'{t.get("turn_wall_clock_s", t.get("llm_latency_s",0)):.1f}s turn · '
+                f'{t.get("llm_latency_s",0):.1f}s LLM{usage_bit} · '
                 f'{len(inner):,} chars (click to expand)'
                 f'</summary>{inner}</details>'
             )
@@ -1276,10 +1326,36 @@ def _render_extended_metrics(fr: dict) -> str:
 
 
 def _render_turn(t: dict) -> str:
+    trunc_bits = []
+    if t.get("tool_output_truncated"):
+        trunc_bits.append("tool I/O clipped")
+    if t.get("reasoning_logged_truncated"):
+        trunc_bits.append("reasoning clipped")
+    if t.get("provider_truncated"):
+        trunc_bits.append("provider limit")
+        for h in t.get("provider_truncation_hints") or []:
+            trunc_bits.append(str(h))
+    trunc_txt = ""
+    if trunc_bits:
+        trunc_txt = f' · <span class="latency-hint">{html.escape(" | ".join(trunc_bits[:4]))}'
+        if len(trunc_bits) > 4:
+            trunc_txt += "…"
+
+    usage_s = _turn_llm_usage_label(t)
+    usage_span = (
+        f' · <span class="turn-tokens">{html.escape(usage_s)}</span>'
+        if usage_s
+        else ""
+    )
+
     parts = [f'<div class="turn"><div class="turn-head">'
              f'<span class="turn-id">turn {t.get("turn_id","?")}</span>'
-             f'<span>llm latency: {t.get("llm_latency_s",0):.1f}s</span>'
+             f'<span>{t.get("turn_wall_clock_s", t.get("llm_latency_s",0)):.1f}s turn · '
+             f'{t.get("llm_latency_s",0):.1f}s LLM · '
+             f'{t.get("tools_wall_clock_s",0):.1f}s tools'
+             f'{usage_span}</span>'
              f'{" · <b>FINAL</b>" if t.get("is_final") else ""}'
+             f'{trunc_txt}'
              f'</div>']
 
     # Render assistant response items: reasoning + text + function_calls

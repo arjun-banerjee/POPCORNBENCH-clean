@@ -66,8 +66,21 @@ class KernelTurn:
     # Free-form feedback string (used only on LLM-call failure turns; the
     # regular tool-results flow is captured in `tool_calls` instead).
     feedback_to_model: str = ""
-    # Wall-clock time for the LLM call (seconds).
+    # Wall-clock time for the LLM HTTP/SDK call only (seconds), excluding tool
+    # execution within the turn.
     llm_latency_s: float = 0.0
+    # Wall-clock for the entire turn (seconds): warnings injected, compaction,
+    # snapshot, LLM call, and all synchronous tool executions in this iteration.
+    turn_wall_clock_s: float = 0.0
+    # Sum of tool execution durations (seconds) for calls that actually ran tools.
+    tools_wall_clock_s: float = 0.0
+    # True if tool/function_call_output text was shortened before sending to the LLM.
+    tool_output_truncated: bool = False
+    # True if reasoning excerpt stored in trajectory was shortened (chat path).
+    reasoning_logged_truncated: bool = False
+    # Provider hit output limits / incomplete Responses items (detected before status strip).
+    provider_truncated: bool = False
+    provider_truncation_hints: list[str] = field(default_factory=list)
     # Whether this turn contained a final submission (submit_kernel that
     # produced a real KernelExecResult).
     is_final: bool = False
@@ -106,11 +119,23 @@ class KernelTrajectory:
     # Final result (set after submit_kernel or when turns exhausted)
     final_result: KernelExecResult | None = None
 
+    # Monotonic perf counter baseline for wall-clock totals (never serialized).
+    run_start_perf: float = field(default_factory=time.perf_counter)
+
     # Timestamps (ISO-8601 strings)
     started_at: str = field(
         default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     )
     finished_at: str | None = None
+
+    # Wall-clock for the entire agent run (seconds, monotonic-derived).
+    agent_wall_clock_s: float | None = None
+
+    # True if chat sliding-window compaction dropped older messages.
+    chat_history_window_truncated: bool = False
+
+    # OR of chat compression + any per-turn truncation / provider truncation flags.
+    truncation_occurred: bool = False
 
     # Summary stats (filled in by finish())
     total_turns: int = 0
@@ -139,6 +164,24 @@ class KernelTrajectory:
         self.total_turns = len(self.turns)
         self.total_tool_calls = sum(len(t.tool_calls) for t in self.turns)
         self._recompute_llm_usage_totals()
+
+        elapsed = float(time.perf_counter() - self.run_start_perf)
+        self.agent_wall_clock_s = round(elapsed, 6)
+
+        any_turn_truncated = bool(
+            any(
+                (
+                    tt.tool_output_truncated
+                    or tt.reasoning_logged_truncated
+                    or tt.provider_truncated
+                    or len(tt.provider_truncation_hints or []) > 0
+                )
+                for tt in self.turns
+            )
+        )
+        self.truncation_occurred = (
+            bool(self.chat_history_window_truncated) or any_turn_truncated
+        )
 
         if result is None:
             self.outcome = "error"
@@ -209,6 +252,9 @@ class KernelTrajectory:
             "tools_enabled": self.tools_enabled,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "agent_wall_clock_s": self.agent_wall_clock_s,
+            "chat_history_window_truncated": self.chat_history_window_truncated,
+            "truncation_occurred": self.truncation_occurred,
             "total_turns": self.total_turns,
             "total_tool_calls": self.total_tool_calls,
             "llm_input_tokens": self.llm_input_tokens,
@@ -225,6 +271,14 @@ class KernelTrajectory:
                     "response": _coerce(t.response),
                     "feedback_to_model": t.feedback_to_model,
                     "llm_latency_s": t.llm_latency_s,
+                    "turn_wall_clock_s": round(t.turn_wall_clock_s, 6),
+                    "tools_wall_clock_s": round(t.tools_wall_clock_s, 6),
+                    "tool_output_truncated": t.tool_output_truncated,
+                    "reasoning_logged_truncated": t.reasoning_logged_truncated,
+                    "provider_truncated": t.provider_truncated,
+                    "provider_truncation_hints": _coerce(
+                        t.provider_truncation_hints or []
+                    ),
                     "is_final": t.is_final,
                     "submitted_kernel": t.submitted_kernel,
                     "llm_usage": _coerce(t.llm_usage),

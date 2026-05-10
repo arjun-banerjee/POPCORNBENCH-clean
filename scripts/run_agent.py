@@ -210,6 +210,10 @@ def main(config: AgentConfig):
     print(f"  Outcome:           {trajectory.outcome}")
     print(f"  Total turns:       {trajectory.total_turns}")
     print(f"  Total tool calls:  {trajectory.total_tool_calls}")
+    if trajectory.agent_wall_clock_s is not None:
+        print(f"  Wall clock run:    {trajectory.agent_wall_clock_s:.1f}s")
+    print(f"  LLM total tokens:  {trajectory.llm_total_tokens}")
+    print(f"  Truncation:        {'yes' if trajectory.truncation_occurred else 'no'}")
     if trajectory.final_result:
         r = trajectory.final_result
         print(f"  Compiled:          {r.compiled}")

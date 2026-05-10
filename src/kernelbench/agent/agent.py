@@ -38,7 +38,7 @@ import os
 import time
 import traceback
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Sequence
 
 import torch
 from openai import OpenAI
@@ -80,6 +80,43 @@ def _strip_status(obj: Any) -> None:
     elif isinstance(obj, list):
         for v in obj:
             _strip_status(v)
+
+
+def _responses_provider_truncation_hints(output_items: Sequence[Any]) -> tuple[bool, list[str]]:
+    """Extract provider-side truncation hints from Responses API outputs (pre-strip).
+
+    ``status != completed`` / non-empty ``incomplete_details`` are treated as
+    truncated or incomplete generations. Best-effort: tolerates heterogeneous
+    SDK object shapes without failing the run.
+    """
+    hints_raw: list[str] = []
+    for item in output_items:
+        md_fn = getattr(item, "model_dump", None)
+        if not callable(md_fn):
+            continue
+        try:
+            raw = md_fn(mode="python")
+        except TypeError:
+            try:
+                raw = md_fn()
+            except Exception:
+                continue
+        except Exception:
+            continue
+        if not isinstance(raw, dict):
+            continue
+        status = raw.get("status")
+        if isinstance(status, str):
+            slug = status.strip().lower()
+            if slug and slug != "completed":
+                hints_raw.append(f"status:{status}")
+        elif status not in (None, ""):
+            hints_raw.append(f"status:{status!r}")
+        inc = raw.get("incomplete_details")
+        if inc is not None:
+            hints_raw.append(f"incomplete_details:{inc!r}")
+    uniq = sorted(set(hints_raw))
+    return bool(uniq), uniq
 
 
 class KernelAgent:
@@ -285,7 +322,9 @@ class KernelAgent:
             flush=True,
         )
         self._total_tool_calls += 1
+        autof_t0 = time.perf_counter()
         tool_result = self._execute_tool(submit_tool, {"kernel_code": kernel})
+        autof_wall = float(time.perf_counter() - autof_t0)
         finalized = self._finalize_from_submit_result(tool_result)
         trajectory.add_turn(
             KernelTurn(
@@ -303,6 +342,12 @@ class KernelAgent:
                 ],
                 feedback_to_model="",
                 llm_latency_s=0.0,
+                turn_wall_clock_s=autof_wall,
+                tools_wall_clock_s=autof_wall,
+                tool_output_truncated=False,
+                reasoning_logged_truncated=False,
+                provider_truncated=False,
+                provider_truncation_hints=[],
                 is_final=finalized,
                 submitted_kernel=kernel if finalized else None,
             )
@@ -456,6 +501,9 @@ class KernelAgent:
             # Pacing for rate-limited APIs.
             if turn_idx > 0 and self.turn_delay_s > 0:
                 time.sleep(self.turn_delay_s)
+            turn_wall_start = time.perf_counter()
+            turn_tool_truncated = False
+
             print(
                 f"{tag} turn {turn_idx + 1}/{self.max_turns} → LLM call...",
                 flush=True,
@@ -484,7 +532,7 @@ class KernelAgent:
                 )
 
             if self.tool_output_context_max_chars > 0:
-                compact_responses_input_items(
+                turn_tool_truncated = compact_responses_input_items(
                     input_items,
                     tool_output_max_chars=self.tool_output_context_max_chars,
                 )
@@ -551,12 +599,19 @@ class KernelAgent:
                             f"{err_msg}\n{tb}",
                             flush=True,
                         )
+                        turn_elapsed_s = float(time.perf_counter() - turn_wall_start)
                         failed_turn = KernelTurn(
                             turn_id=turn_idx,
                             messages_in=messages_in_snapshot,
                             response=[],
                             feedback_to_model=f"LLM call failed: {err_msg}",
                             llm_latency_s=llm_latency,
+                            turn_wall_clock_s=turn_elapsed_s,
+                            tools_wall_clock_s=0.0,
+                            tool_output_truncated=turn_tool_truncated,
+                            reasoning_logged_truncated=False,
+                            provider_truncated=False,
+                            provider_truncation_hints=[],
                             is_final=False,
                         )
                         trajectory.add_turn(failed_turn)
@@ -572,6 +627,11 @@ class KernelAgent:
                     time.sleep(delay)
 
             assert response is not None  # loop exits via return if all fail
+
+            tools_wall_accum = 0.0
+            prov_truncated, provider_hints_turn = (
+                _responses_provider_truncation_hints(response.output)
+            )
 
             turn_usage = llm_usage_to_dict(getattr(response, "usage", None))
 
@@ -644,10 +704,12 @@ class KernelAgent:
                             flush=True,
                         )
                         self._total_tool_calls += 1
+                        _tb0 = time.perf_counter()
                         tr = self._execute_tool(
                             self.tool_map["submit_kernel"],
                             {"kernel_code": fb_kernel},
                         )
+                        tools_wall_accum += float(time.perf_counter() - _tb0)
                         is_final_fb = self._finalize_from_submit_result(tr)
                         submitted_fb = fb_kernel if is_final_fb else None
                         executed_fb.append(
@@ -659,6 +721,7 @@ class KernelAgent:
                                 metadata=tr.metadata,
                             )
                         )
+                    turn_elapsed_fb = float(time.perf_counter() - turn_wall_start)
                     trajectory.add_turn(
                         KernelTurn(
                             turn_id=turn_idx,
@@ -667,6 +730,12 @@ class KernelAgent:
                             tool_calls=executed_fb,
                             feedback_to_model="",
                             llm_latency_s=llm_latency,
+                            turn_wall_clock_s=turn_elapsed_fb,
+                            tools_wall_clock_s=tools_wall_accum,
+                            tool_output_truncated=turn_tool_truncated,
+                            reasoning_logged_truncated=False,
+                            provider_truncated=prov_truncated,
+                            provider_truncation_hints=list(provider_hints_turn),
                             is_final=is_final_fb,
                             submitted_kernel=submitted_fb,
                             llm_usage=turn_usage,
@@ -679,6 +748,7 @@ class KernelAgent:
                             flush=True,
                         )
                     break
+                turn_elapsed_nt = float(time.perf_counter() - turn_wall_start)
                 trajectory.add_turn(
                     KernelTurn(
                         turn_id=turn_idx,
@@ -687,6 +757,12 @@ class KernelAgent:
                         tool_calls=[],
                         feedback_to_model="",
                         llm_latency_s=llm_latency,
+                        turn_wall_clock_s=turn_elapsed_nt,
+                        tools_wall_clock_s=tools_wall_accum,
+                        tool_output_truncated=turn_tool_truncated,
+                        reasoning_logged_truncated=False,
+                        provider_truncated=prov_truncated,
+                        provider_truncation_hints=list(provider_hints_turn),
                         is_final=False,
                         llm_usage=turn_usage,
                     )
@@ -785,9 +861,10 @@ class KernelAgent:
                     continue
 
                 tool = self.tool_map[tool_name]
-                _t_tool = time.time()
+                _t_tool = time.perf_counter()
                 tool_result = self._execute_tool(tool, args)
-                _tool_dt = time.time() - _t_tool
+                _tool_dt = time.perf_counter() - _t_tool
+                tools_wall_accum += float(_tool_dt)
                 print(
                     f"{tag}   {tool_name} {'OK' if tool_result.success else 'FAIL'} "
                     f"({_tool_dt:.1f}s)",
@@ -827,13 +904,15 @@ class KernelAgent:
                         break
 
             if not is_final:
-                is_final, auto_kernel = self._maybe_autofinalize_last_turn(
+                is_final, auto_kernel, auto_tool_s = self._maybe_autofinalize_last_turn(
                     turn_idx=turn_idx,
                     executed_tool_calls=executed_tool_calls,
                 )
+                tools_wall_accum += float(auto_tool_s)
                 if auto_kernel:
                     submitted_kernel = auto_kernel
 
+            turn_elapsed_s = float(time.perf_counter() - turn_wall_start)
             turn = KernelTurn(
                 turn_id=turn_idx,
                 messages_in=messages_in_snapshot,
@@ -841,6 +920,12 @@ class KernelAgent:
                 tool_calls=executed_tool_calls,
                 feedback_to_model="",
                 llm_latency_s=llm_latency,
+                turn_wall_clock_s=turn_elapsed_s,
+                tools_wall_clock_s=tools_wall_accum,
+                tool_output_truncated=turn_tool_truncated,
+                reasoning_logged_truncated=False,
+                provider_truncated=prov_truncated,
+                provider_truncation_hints=list(provider_hints_turn),
                 is_final=is_final,
                 submitted_kernel=submitted_kernel,
                 llm_usage=turn_usage,
@@ -892,14 +977,17 @@ class KernelAgent:
         *,
         turn_idx: int,
         executed_tool_calls: list[ToolCall],
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str | None, float]:
         """On the last turn, auto-submit after successful compile or correctness.
 
         Avoids `error` when the model runs out of turns right after a good
         compile_kernel or run_correctness without calling submit_kernel.
+
+        Third return value is the wall-clock duration (seconds) of the injected
+        ``submit_kernel`` tool call when this helper runs work; otherwise 0.
         """
         if turn_idx != self.max_turns - 1 or not executed_tool_calls:
-            return False, None
+            return False, None, 0.0
 
         last_call = executed_tool_calls[-1]
         meta = last_call.metadata or {}
@@ -910,20 +998,20 @@ class KernelAgent:
             or not kernel_code
             or not meta.get("compiled")
         ):
-            return False, None
+            return False, None, 0.0
         if last_call.tool_name == "run_correctness" and not meta.get("correctness"):
-            return False, None
+            return False, None, 0.0
         if last_call.tool_name not in ("run_correctness", "compile_kernel"):
-            return False, None
+            return False, None, 0.0
 
         submit_tool = self.tool_map.get("submit_kernel")
         if submit_tool is None:
-            return False, None
+            return False, None, 0.0
 
         tag = self._tag()
-        _t_tool = time.time()
+        _t_tool = time.perf_counter()
         tool_result = self._execute_tool(submit_tool, {"kernel_code": kernel_code})
-        _tool_dt = time.time() - _t_tool
+        _tool_dt = time.perf_counter() - _t_tool
         print(
             f"{tag}   submit_kernel {'OK' if tool_result.success else 'FAIL'} "
             f"({_tool_dt:.1f}s) [auto-finalize]",
@@ -940,7 +1028,11 @@ class KernelAgent:
             )
         )
 
-        return self._finalize_from_submit_result(tool_result), kernel_code
+        return (
+            self._finalize_from_submit_result(tool_result),
+            kernel_code,
+            float(_tool_dt),
+        )
 
     # -----------------------------------------------------------------------
     # Chat Completions code path
@@ -1020,6 +1112,9 @@ class KernelAgent:
         for turn_idx in range(self.max_turns):
             if turn_idx > 0 and self.turn_delay_s > 0:
                 time.sleep(self.turn_delay_s)
+            turn_wall_start = time.perf_counter()
+            turn_tool_truncated = False
+
             print(
                 f"{tag} turn {turn_idx + 1}/{self.max_turns} → LLM call...",
                 flush=True,
@@ -1048,15 +1143,16 @@ class KernelAgent:
                 )
 
             if self.tool_output_context_max_chars > 0:
-                compact_chat_tool_messages(
+                turn_tool_truncated = compact_chat_tool_messages(
                     messages,
                     tool_output_max_chars=self.tool_output_context_max_chars,
                 )
             if self.chat_context_tail_messages is not None:
-                maybe_sliding_window_chat(
+                if maybe_sliding_window_chat(
                     messages,
                     keep_tail=self.chat_context_tail_messages,
-                )
+                ):
+                    trajectory.chat_history_window_truncated = True
 
             messages_in_snapshot = json.loads(json.dumps(messages))
 
@@ -1123,6 +1219,12 @@ class KernelAgent:
                                 response=[],
                                 feedback_to_model=f"LLM call failed: {err_msg}",
                                 llm_latency_s=llm_latency,
+                                turn_wall_clock_s=float(time.perf_counter() - turn_wall_start),
+                                tools_wall_clock_s=0.0,
+                                tool_output_truncated=turn_tool_truncated,
+                                reasoning_logged_truncated=False,
+                                provider_truncated=False,
+                                provider_truncation_hints=[],
                                 is_final=False,
                             )
                         )
@@ -1138,15 +1240,27 @@ class KernelAgent:
                     time.sleep(delay)
 
             assert response is not None
+            choice = response.choices[0]
+            finish_reason = getattr(choice, "finish_reason", None)
+            provider_truncated = isinstance(finish_reason, str) and (
+                finish_reason.lower() == "length"
+            )
+            provider_hints_turn = (
+                [f"finish_reason:{finish_reason}"]
+                if provider_truncated
+                else []
+            )
+            tools_wall_accum = 0.0
+
             turn_usage = llm_usage_to_dict(getattr(response, "usage", None))
-            _n_fc_chat = len(response.choices[0].message.tool_calls or [])
+            _asst_msg_early = choice.message
+            _n_fc_chat = len((_asst_msg_early.tool_calls or []) if _asst_msg_early else [])
             print(
                 f"{tag} turn {turn_idx + 1} LLM done in {llm_latency:.1f}s "
                 f"({_n_fc_chat} tool call{'s' if _n_fc_chat != 1 else ''})",
                 flush=True,
             )
 
-            choice = response.choices[0]
             asst = choice.message
             assert asst is not None
             asst_content = asst.content or ""
@@ -1190,9 +1304,10 @@ class KernelAgent:
             # Build a Responses-shaped record for the trajectory (so the HTML
             # report doesn't have to know about both API shapes).
             response_items: list[dict[str, Any]] = []
+            reasoning_logged_truncated = False
             if reasoning:
                 if self.reasoning_context_max_chars > 0:
-                    reasoning = truncate_context_str(
+                    reasoning, reasoning_logged_truncated = truncate_context_str(
                         reasoning,
                         self.reasoning_context_max_chars,
                         "reasoning",
@@ -1244,10 +1359,12 @@ class KernelAgent:
                             flush=True,
                         )
                         self._total_tool_calls += 1
+                        _tb0 = time.perf_counter()
                         tr = self._execute_tool(
                             self.tool_map["submit_kernel"],
                             {"kernel_code": fb_kernel},
                         )
+                        tools_wall_accum += float(time.perf_counter() - _tb0)
                         is_final_fb = self._finalize_from_submit_result(tr)
                         submitted_fb = fb_kernel if is_final_fb else None
                         executed_fb.append(
@@ -1259,6 +1376,7 @@ class KernelAgent:
                                 metadata=tr.metadata,
                             )
                         )
+                    turn_elapsed_fb = float(time.perf_counter() - turn_wall_start)
                     trajectory.add_turn(
                         KernelTurn(
                             turn_id=turn_idx,
@@ -1267,6 +1385,12 @@ class KernelAgent:
                             tool_calls=executed_fb,
                             feedback_to_model="",
                             llm_latency_s=llm_latency,
+                            turn_wall_clock_s=turn_elapsed_fb,
+                            tools_wall_clock_s=tools_wall_accum,
+                            tool_output_truncated=turn_tool_truncated,
+                            reasoning_logged_truncated=reasoning_logged_truncated,
+                            provider_truncated=provider_truncated,
+                            provider_truncation_hints=list(provider_hints_turn),
                             is_final=is_final_fb,
                             submitted_kernel=submitted_fb,
                             llm_usage=turn_usage,
@@ -1279,6 +1403,7 @@ class KernelAgent:
                             flush=True,
                         )
                     break
+                turn_elapsed_nn = float(time.perf_counter() - turn_wall_start)
                 trajectory.add_turn(
                     KernelTurn(
                         turn_id=turn_idx,
@@ -1287,6 +1412,12 @@ class KernelAgent:
                         tool_calls=[],
                         feedback_to_model="",
                         llm_latency_s=llm_latency,
+                        turn_wall_clock_s=turn_elapsed_nn,
+                        tools_wall_clock_s=tools_wall_accum,
+                        tool_output_truncated=turn_tool_truncated,
+                        reasoning_logged_truncated=reasoning_logged_truncated,
+                        provider_truncated=provider_truncated,
+                        provider_truncation_hints=list(provider_hints_turn),
                         is_final=False,
                         llm_usage=turn_usage,
                     )
@@ -1366,9 +1497,10 @@ class KernelAgent:
                     continue
 
                 tool = self.tool_map[tool_name]
-                _t_tool = time.time()
+                _t_tool = time.perf_counter()
                 tool_result = self._execute_tool(tool, args)
-                _tool_dt = time.time() - _t_tool
+                _tool_dt = time.perf_counter() - _t_tool
+                tools_wall_accum += float(_tool_dt)
                 print(
                     f"{tag}   {tool_name} {'OK' if tool_result.success else 'FAIL'} "
                     f"({_tool_dt:.1f}s)",
@@ -1402,13 +1534,15 @@ class KernelAgent:
                         break
 
             if not is_final:
-                is_final, auto_kernel = self._maybe_autofinalize_last_turn(
+                is_final, auto_kernel, auto_tool_s = self._maybe_autofinalize_last_turn(
                     turn_idx=turn_idx,
                     executed_tool_calls=executed_tool_calls,
                 )
+                tools_wall_accum += float(auto_tool_s)
                 if auto_kernel:
                     submitted_kernel = auto_kernel
 
+            turn_elapsed_chat = float(time.perf_counter() - turn_wall_start)
             trajectory.add_turn(
                 KernelTurn(
                     turn_id=turn_idx,
@@ -1417,6 +1551,12 @@ class KernelAgent:
                     tool_calls=executed_tool_calls,
                     feedback_to_model="",
                     llm_latency_s=llm_latency,
+                    turn_wall_clock_s=turn_elapsed_chat,
+                    tools_wall_clock_s=tools_wall_accum,
+                    tool_output_truncated=turn_tool_truncated,
+                    reasoning_logged_truncated=reasoning_logged_truncated,
+                    provider_truncated=provider_truncated,
+                    provider_truncation_hints=list(provider_hints_turn),
                     is_final=is_final,
                     submitted_kernel=submitted_kernel,
                     llm_usage=turn_usage,
