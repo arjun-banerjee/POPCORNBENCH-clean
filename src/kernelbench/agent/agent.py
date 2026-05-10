@@ -130,6 +130,7 @@ class KernelAgent:
         api_kind: str = "openai",
         save_path: str | None = None,
         eval_client: Any = None,
+        initial_message: str | None = None,
     ) -> None:
         self.problem_id = problem_id
         self.level = level
@@ -172,6 +173,9 @@ class KernelAgent:
             verbose=verbose,
             eval_client=eval_client,
         )
+
+        # Optional override for the first user message (e.g. hw_translation prompt).
+        self._initial_message = initial_message
 
         # Per-run mutable state.
         self._total_tool_calls: int = 0
@@ -313,11 +317,14 @@ class KernelAgent:
             backend=self.backend,
             tool_names=self.tool_names_enabled,
         )
-        problem_msg = build_problem_message(
-            ref_arch_src=self.ref_arch_src,
-            backend=self.backend,
-            precision=self.precision,
-        )
+        if self._initial_message is not None:
+            problem_msg = self._initial_message
+        else:
+            problem_msg = build_problem_message(
+                ref_arch_src=self.ref_arch_src,
+                backend=self.backend,
+                precision=self.precision,
+            )
 
         # The input array we resend every turn. It grows monotonically as:
         #   - the model emits reasoning / function_call items (we append all
@@ -684,11 +691,14 @@ class KernelAgent:
             backend=self.backend,
             tool_names=self.tool_names_enabled,
         )
-        problem_msg = build_problem_message(
-            ref_arch_src=self.ref_arch_src,
-            backend=self.backend,
-            precision=self.precision,
-        )
+        if self._initial_message is not None:
+            problem_msg = self._initial_message
+        else:
+            problem_msg = build_problem_message(
+                ref_arch_src=self.ref_arch_src,
+                backend=self.backend,
+                precision=self.precision,
+            )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": instructions},

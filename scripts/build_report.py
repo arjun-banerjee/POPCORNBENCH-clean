@@ -1356,11 +1356,92 @@ def _details(summary: str, body: str, cls: str = "", open_: bool = False,
 
 
 # ---------------------------------------------------------------------------
+# Per-level landing pages
+# ---------------------------------------------------------------------------
+
+def _render_level_index(run_name: str, level: int, trajs: list[dict],
+                        generated_at: str) -> str:
+    """Filtered landing page for one level.  Lives at report/l{N}/index.html.
+
+    Trajectory links resolve via ../v/{variant}/t/{traj_id}.html so the
+    actual trajectory pages are not duplicated.
+    """
+    by_variant: dict[str, list[dict]] = {}
+    for d in trajs:
+        by_variant.setdefault(d["_variant"], []).append(d)
+
+    sections = []
+    for variant in sorted(by_variant.keys()):
+        by_model: dict[str, list[dict]] = {}
+        for d in by_variant[variant]:
+            by_model.setdefault(d.get("model_name") or d["_model_dir"], []).append(d)
+
+        cards = []
+        for model in sorted(by_model.keys()):
+            for d in sorted(by_model[model], key=lambda x: x.get("problem_id", 0)):
+                pid = d.get("problem_id")
+                outcome = d.get("outcome", "unknown")
+                sp = _speedup(d)
+                sp_str = ""
+                if sp is not None:
+                    cls = "speedup-pos" if sp >= 1 else "speedup-neg"
+                    sp_str = f'<span class="card-speedup {cls}">{sp:.2f}x</span>'
+                rt = (d.get("final_result") or {}).get("runtime", -1)
+                rt_str = f"{rt:.1f}μs" if rt and rt > 0 else "—"
+                traj_href = (f"../v/{_safe_filename(variant)}/t/"
+                             f"{_trajectory_id(d)}.html")
+                cards.append(
+                    f'<a class="tool-card" href="{traj_href}">'
+                    f'<div class="card-top">'
+                    f'<span class="card-name">P{pid} · {html.escape(model)}</span>'
+                    f'<span class="card-meta">'
+                    f'{html.escape((d.get("problem_name") or "")[:32])}</span>'
+                    f'</div>'
+                    f'<div class="card-row">'
+                    f'<span class="outcome-badge {_outcome_class(outcome)}">{outcome}</span>'
+                    f'{sp_str}<span class="card-runtime">{rt_str}</span>'
+                    f'</div></a>'
+                )
+
+        vn = len(by_variant[variant])
+        vc = sum(1 for d in by_variant[variant] if d.get("outcome") == "correct")
+        sections.append(
+            f'<div class="page-wrap">'
+            f'<div class="section-label">{html.escape(variant)} · {vc}/{vn} correct</div>'
+            f'<div class="tool-grid">{"".join(cards)}</div>'
+            f'</div>'
+        )
+
+    n_total = len(trajs)
+    n_correct = sum(1 for d in trajs if d.get("outcome") == "correct")
+    head = (
+        f'<header><div class="page-wrap">'
+        f'<div class="site-title">'
+        f'<a href="../../index.html" title="all sweeps">L{level} · {html.escape(run_name)}</a>'
+        f'</div>'
+        f'<div class="site-subtitle">level {level} · {n_correct}/{n_total} correct</div>'
+        f'<div class="header-links">'
+        f'<a href="../index.html">← all levels</a>'
+        f'<span class="meta">generated {html.escape(generated_at)}</span>'
+        f'</div></div></header>'
+    )
+    return (head
+            + _stat_row(trajs)
+            + _sweep_metrics_block(trajs)
+            + "".join(sections))
+
+
+# ---------------------------------------------------------------------------
 # Top-level: build_report
 # ---------------------------------------------------------------------------
 
-def build_report(run_dir: str) -> None:
-    """Rebuild the static report site under {run_dir}/report/.
+def build_report(run_dir: str, output_dir: str | None = None,
+                 model_filter: list[str] | None = None) -> None:
+    """Rebuild the static report site under {run_dir}/report/ (or output_dir).
+
+    *output_dir* lets callers write the report somewhere other than
+    {run_dir}/report/ — useful when run_dir is read-only (e.g. a colleague's
+    scratch space).  Trajectory data is always read from run_dir.
 
     Layout:
         report/index.html                       -- all-variants overview
@@ -1368,12 +1449,13 @@ def build_report(run_dir: str) -> None:
         report/v/{variant}/index.html           -- per-variant summary
         report/v/{variant}/models/{model}.html  -- model card grid
         report/v/{variant}/t/{traj_id}.html     -- one page per trajectory
+        report/l{N}/index.html                  -- per-level filtered landing page
     """
     import time as _time
     generated_at = _time.strftime("%Y-%m-%d %H:%M:%S", _time.gmtime()) + " UTC"
 
     run_name = os.path.basename(os.path.normpath(run_dir))
-    report_dir = os.path.join(run_dir, "report")
+    report_dir = output_dir if output_dir is not None else os.path.join(run_dir, "report")
     os.makedirs(report_dir, exist_ok=True)
     sibling_tiers = _discover_sibling_tiers(run_dir, run_name)
     if sibling_tiers:
@@ -1385,6 +1467,9 @@ def build_report(run_dir: str) -> None:
         f.write(_CSS)
 
     trajs = _load_all_trajectories(run_dir)
+    if model_filter:
+        trajs = [d for d in trajs
+                 if (d.get("model_name") or d["_model_dir"]) in model_filter]
 
     # Group trajectories by variant.
     by_variant: dict[str, list[dict]] = {}
@@ -1430,16 +1515,40 @@ def build_report(run_dir: str) -> None:
                 f.write(_page(f"L{d.get('level')} P{d.get('problem_id')} · {variant}",
                               body, css_path="../../../style.css"))
 
+    # Per-level landing pages: report/l{N}/index.html
+    by_level: dict[int, list[dict]] = {}
+    for d in trajs:
+        lvl = d.get("level")
+        if lvl is not None:
+            by_level.setdefault(int(lvl), []).append(d)
+    for level, level_trajs in sorted(by_level.items()):
+        ldir = os.path.join(report_dir, f"l{level}")
+        os.makedirs(ldir, exist_ok=True)
+        body = _render_level_index(run_name, level, level_trajs, generated_at)
+        with open(os.path.join(ldir, "index.html"), "w") as f:
+            f.write(_page(f"L{level} · {run_name}", body, css_path="../style.css"))
+
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: build_report.py <runs/{run_name} dir>")
+        print("usage: build_report.py <runs/{run_name} dir> [--output-dir <dir>] [--models m1,m2]")
         sys.exit(2)
     run_dir = sys.argv[1]
     if not os.path.isabs(run_dir):
         run_dir = os.path.join(REPO_TOP_DIR, run_dir)
-    build_report(run_dir)
-    print(f"[build_report] wrote {os.path.join(run_dir, 'report', 'index.html')}")
+    output_dir = None
+    if "--output-dir" in sys.argv:
+        idx = sys.argv.index("--output-dir")
+        if idx + 1 < len(sys.argv):
+            output_dir = sys.argv[idx + 1]
+    model_filter = None
+    if "--models" in sys.argv:
+        idx = sys.argv.index("--models")
+        if idx + 1 < len(sys.argv):
+            model_filter = sys.argv[idx + 1].split(",")
+    build_report(run_dir, output_dir=output_dir, model_filter=model_filter)
+    dest = output_dir if output_dir else os.path.join(run_dir, "report")
+    print(f"[build_report] wrote {os.path.join(dest, 'index.html')}")
 
 
 if __name__ == "__main__":

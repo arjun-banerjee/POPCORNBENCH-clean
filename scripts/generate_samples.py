@@ -65,10 +65,25 @@ class GenerationConfig(Config):
         self.server_type = None
         self.model_name = None
         self.max_tokens = None
+        # For models that require max_completion_tokens (e.g. gpt-5.5); auto-detected
+        # from model_name when None.
+        self.max_completion_tokens = None
         self.temperature = 0.0
         # Local server override (for server_type=local, e.g. vLLM on localhost:8000)
         self.server_address = None
         self.server_port = None
+
+        # Azure OpenAI / custom gateway override.
+        # Set openai_base_url to your Azure endpoint and openai_api_key_env to
+        # the name of the env var holding the API key.  When set, model_name
+        # should be prefixed with "azure/" (e.g. "azure/gpt-4o").
+        # Example:
+        #   server_type = openai
+        #   model_name = azure/gpt-4o
+        #   openai_base_url = https://my-resource.cognitiveservices.azure.com/openai/v1/
+        #   openai_api_key_env = AZURE_OPENAI_API_KEY
+        self.openai_base_url = None
+        self.openai_api_key_env = None
 
         # Reasoning model specific parameters
         self.is_reasoning_model = False  # set to True for o1, o3, Gemini 2.5 thinking, etc.
@@ -110,8 +125,12 @@ class GenerationConfig(Config):
         # another (same DSL). Set prompt_option=hardware_translation and provide
         # source_hardware_gpu_name (the GPU the source kernels were tuned for)
         # plus hardware_gpu_name (the target GPU). Source kernels are loaded from
-        # source_kernel_dir or _translation_sources/{backend}/.
+        # source_kernel_dir or _translation_sources/{backend}/. Batch eval uses
+        # reference_kernel_dir for target-GPU KernelBench .py reference modules.
         self.source_hardware_gpu_name = None
+        self.reference_kernel_dir = None
+        self.hardware_translation_io_dir = None
+        self.hardware_translation_oracle_dir = None
 
         self.check_kernel = True  # [experimental] optional static checker catching potential hacking patterns
 
@@ -153,10 +172,20 @@ def _resolve_source_kernel_src(
         )
     candidate = os.path.join(src_dir, problem.name)
     if not os.path.exists(candidate):
-        raise FileNotFoundError(
-            f"No source kernel for problem '{problem.name}' under {src_dir}. "
-            "Run scripts/build_translation_dataset.py to populate this directory."
-        )
+        # Try alternate extensions: .cu and .cuh (for hardware translation where
+        # problem files are .py but source kernels are raw CUDA files)
+        stem = os.path.splitext(problem.name)[0]
+        for ext in (".cu", ".cuh"):
+            alt = os.path.join(src_dir, stem + ext)
+            if os.path.exists(alt):
+                candidate = alt
+                break
+        else:
+            raise FileNotFoundError(
+                f"No source kernel for problem '{problem.name}' under {src_dir}. "
+                "Tried .py, .cu, and .cuh extensions. "
+                "Run scripts/build_translation_dataset.py to populate this directory."
+            )
     with open(candidate, "r") as f:
         return f.read()
 
@@ -210,11 +239,23 @@ def generate_sample_single(
                 "prompt_option=hardware_translation requires hardware_gpu_name "
                 "(the target GPU to re-optimize for, e.g. 'A100')."
             )
+        if not getattr(config, "hardware_translation_io_dir", None):
+            raise ValueError(
+                "prompt_option=hardware_translation requires hardware_translation_io_dir "
+                "(per-problem `contract` TOML under KernelBench/level5/hardware_translation/io)."
+            )
         if not config.source_backend:
             config.source_backend = config.backend
         source_kernel_src = _resolve_source_kernel_src(config, problem, ref_arch_src)
+        from kernelbench.hardware_translation_io import load_io_contract_from_toml
+
+        io_contract = load_io_contract_from_toml(
+            repo_top=REPO_TOP_DIR,
+            io_dir=config.hardware_translation_io_dir,
+            problem_name=problem.name,
+        )
         custom_prompt = get_hardware_translation_prompt(
-            ref_arch_src=ref_arch_src,
+            io_contract_src=io_contract,
             source_kernel_src=source_kernel_src,
             backend=config.backend,
             source_gpu_name=config.source_hardware_gpu_name,
@@ -452,6 +493,17 @@ def main(config: GenerationConfig):
     
     if already_completed > 0:
         print(f"📁 Found {already_completed}/{total_problems} kernels already generated. Generating remaining {len(problems_to_run)} kernels.")
+
+    # Apply Azure / custom gateway overrides before building the inference server.
+    # LiteLLM reads OPENAI_API_BASE and OPENAI_API_KEY from the environment.
+    if config.openai_base_url:
+        os.environ["OPENAI_API_BASE"] = config.openai_base_url
+    if config.openai_api_key_env:
+        key_value = os.environ.get(config.openai_api_key_env, "")
+        if key_value:
+            os.environ["OPENAI_API_KEY"] = key_value
+        else:
+            print(f"[WARNING] openai_api_key_env='{config.openai_api_key_env}' is not set in the environment.")
 
     # Create inference function with config parameters
     # We provide some presets in utils but you can also pass in your own, see query_server for more details

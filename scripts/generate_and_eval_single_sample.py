@@ -101,6 +101,9 @@ class EvalConfig(Config):
         # source_hardware_gpu_name (the GPU the source kernel was tuned for) plus
         # hardware_gpu_name (the target GPU). source_kernel_path is still needed.
         self.source_hardware_gpu_name = None
+        self.reference_kernel_dir = None  # legacy; prefer hardware_translation_oracle_dir
+        self.hardware_translation_io_dir = None
+        self.hardware_translation_oracle_dir = None
 
         self.check_kernel = True  # [experimental] optional static checker catching potential hacking patterns
 
@@ -290,6 +293,11 @@ def main(config: EvalConfig):
                 "prompt_option=hardware_translation requires hardware_gpu_name "
                 "(the target GPU to re-optimize for, e.g. 'A100')."
             )
+        if not getattr(config, "hardware_translation_io_dir", None):
+            raise ValueError(
+                "hardware_translation requires hardware_translation_io_dir "
+                "(see KernelBench/level5/hardware_translation/io)."
+            )
         src_path = config.source_kernel_path
         if not os.path.isabs(src_path):
             src_path = os.path.join(REPO_TOP_DIR, src_path)
@@ -299,8 +307,15 @@ def main(config: EvalConfig):
             hw_source_kernel_src = f.read()
         source_kernel_src = hw_source_kernel_src
         source_backend = backend
+        from kernelbench.hardware_translation_io import load_io_contract_from_toml
+
+        io_contract = load_io_contract_from_toml(
+            repo_top=REPO_TOP_DIR,
+            io_dir=config.hardware_translation_io_dir,
+            problem_name=problem_name,
+        )
         custom_prompt = get_hardware_translation_prompt(
-            ref_arch_src=ref_arch_src,
+            io_contract_src=io_contract,
             source_kernel_src=hw_source_kernel_src,
             backend=backend,
             source_gpu_name=config.source_hardware_gpu_name,
@@ -324,7 +339,17 @@ def main(config: EvalConfig):
             include_hardware=include_hardware,
             gpu_name=config.hardware_gpu_name,
         )
-    
+
+    eval_ref_src = ref_arch_src
+    if prompt_option == "hardware_translation":
+        from kernelbench.hardware_translation_io import load_oracle_reference_source
+
+        eval_ref_src = load_oracle_reference_source(
+            repo_top=REPO_TOP_DIR,
+            oracle_dir=config.hardware_translation_oracle_dir,
+            problem_name=problem_name,
+        )
+
     os.makedirs(config.logdir, exist_ok=True)
 
     if config.log_prompt:
@@ -366,7 +391,7 @@ def main(config: EvalConfig):
     # NOTE: no need to wrap around process here as only a single sample
     # see batch eval for examples of process isolation
     kernel_exec_result = eval_kernel_against_ref(
-        ref_arch_src,
+        eval_ref_src,
         custom_kernel,
         verbose=config.verbose,
         measure_performance=True,

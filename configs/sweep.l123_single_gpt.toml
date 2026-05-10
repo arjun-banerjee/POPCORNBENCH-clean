@@ -11,10 +11,10 @@
 #   uv run python scripts/run_sweep.py configs/sweep.l12_single.toml
 
 [run]
-name              = "l12_single"
+name              = "l123_single_gpt"
 dataset_src       = "local"
 variants          = ["original", "popcorn"]
-levels            = [1, 2]
+levels            = [1, 2, 3]
 problem_subset    = []
 backend           = "cuda"
 precision         = "fp32"
@@ -52,11 +52,3 @@ api_key_env        = "POPCORN_CENTRAL_AZURE_KEY"
 rpm                = 250
 tpm                = 250000
 reasoning_effort   = "medium"
-
-[[models]]
-name               = "Kimi-K2.6"
-api_kind           = "openai_chat"
-base_url           = "https://thava-openai.services.ai.azure.com/models"
-api_key_env        = "THAVA_AZURE_KEY"
-rpm                = 250
-tpm                = 250000

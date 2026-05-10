@@ -23,6 +23,9 @@ HARDWARE_COMPONENT_KEYS = [
     "hardware_definitions",
     "hardware_best_practices",
 ]
+# Subset resolved under templates.hardware (not templates.common). Names like
+# ``hardware_translation_*`` must not use this branch.
+HARDWARE_BODY_TEMPLATE_KEYS = frozenset(HARDWARE_COMPONENT_KEYS)
 SOURCE_HARDWARE_COMPONENT_KEYS = [
     "source_hardware_specs",
 ]
@@ -442,8 +445,7 @@ def render_prompt_by_option(
         elif component.startswith("source_hardware_"):
             template_key = f"templates.hardware.{component}"
             prompt_parts.append(cfg.compose_blocks([template_key]))
-        elif component.startswith("hardware_"):
-            # Hardware components from templates.hardware
+        elif component in HARDWARE_BODY_TEMPLATE_KEYS:
             template_key = f"templates.hardware.{component}"
             prompt_parts.append(cfg.compose_blocks([template_key]))
         else:
@@ -579,44 +581,32 @@ def get_translation_prompt(
 
 def get_hardware_translation_prompt(
     *,
-    ref_arch_src: str,
+    io_contract_src: str,
     source_kernel_src: str,
     backend: str,
     source_gpu_name: str,
     target_gpu_name: str,
-    option: str = "hardware_translation",
     precision: Optional[str] = None,
 ) -> str:
     """
-    Generate a hardware-translation prompt: re-optimize a kernel originally
-    tuned for one GPU architecture to run efficiently on another.
+    Hardware-translation prompt: re-optimize source-DSL device code tuned for
+    ``source_gpu_name`` so it runs well on ``target_gpu_name``.
 
-    Unlike ``get_translation_prompt`` (which changes the DSL), this keeps the
-    same backend but changes the target hardware — e.g. an H100-tuned CUDA
-    kernel re-optimized for A100.
-
-    Args:
-        ref_arch_src: PyTorch reference architecture (functional contract).
-        source_kernel_src: The existing kernel tuned for source_gpu_name.
-        backend: The DSL / backend (same for source and target, e.g. "cuda").
-        source_gpu_name: GPU name the source kernel was optimized for
-            (must exist in gpu_specs.py, e.g. "H100").
-        target_gpu_name: GPU name to re-optimize for (e.g. "A100").
-        option: Prompt option name. Defaults to "hardware_translation".
-        precision: Optional precision string (fp32, fp16, bf16).
+    ``io_contract_src`` is the tensor / RNG contract shown to the model (no
+    oracle ``Model``). It usually comes from ``load_io_contract_from_toml``.
     """
     backend_lower = backend.lower()
     return render_prompt_by_option(
         prompts_toml=PROMPTS_TOML,
         backend=backend_lower,
-        option=option.lower(),
+        option="hardware_translation",
         context={
-            "ref_arch_src": ref_arch_src,
             "source_kernel_src": source_kernel_src,
             "source_backend": backend_lower,
+            "io_contract_src": io_contract_src,
         },
         precision=precision,
-        include_hardware=True,
+        include_hardware=False,
         gpu_specs_py=GPU_SPECS_PY,
         gpu_name=target_gpu_name,
         source_gpu_name=source_gpu_name,
@@ -749,9 +739,16 @@ def test_prompt():
     )
     log_prompt(translation_cuda_triton, scratch_dir, "translation_cuda_triton.txt")
 
-    # hardware translation prompt: H100-tuned CUDA -> A100
+    from kernelbench.hardware_translation_io import load_io_contract_from_toml
+
+    # hardware translation prompt: I/O from TOML (no dataset / original .py)
+    hw_io = load_io_contract_from_toml(
+        repo_top=REPO_TOP_PATH,
+        io_dir="KernelBench/level5/hardware_translation/io",
+        problem_name="01_paged_attention_v1.py",
+    )
     hw_translation = get_hardware_translation_prompt(
-        ref_arch_src=ref_arch_src,
+        io_contract_src=hw_io,
         source_kernel_src=cuda_source,
         backend="cuda",
         source_gpu_name="H100",

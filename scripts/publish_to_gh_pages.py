@@ -32,6 +32,7 @@ import datetime as _dt
 import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BRANCH = "gh-pages"
 DEFAULT_WORKTREE = REPO_ROOT.parent / f"{REPO_ROOT.name}-gh-pages"
+# Extra runs directories merged in automatically when --extra-runs-dir is not passed.
+DEFAULT_EXTRA_RUNS_DIRS: list[Path] = [
+    Path("/scratch/tejas/PopcornBench/runs"),
+]
 
 
 def _run(cmd: list[str], cwd: Path | None = None, check: bool = True,
@@ -117,21 +122,62 @@ def _placeholder_html() -> str:
             "</body></html>")
 
 
-def _find_reports(runs_dir: Path, only: str | None) -> list[tuple[str, Path]]:
-    """Return [(run_name, report_dir)] for every runs/*/report/index.html."""
+def _find_reports(
+    runs_dir: Path,
+    only: set[str] | None,
+    gpt_tag: bool = False,
+    gpt_only: bool = False,
+) -> list[tuple[str, Path]]:
+    """Return [(run_name, report_dir)] for every runs/*/report/index.html.
+
+    *gpt_tag*  — append ``_gpt`` to run names that don't already have it
+                 (used for extra/read-only source dirs).
+    *gpt_only* — skip runs whose (possibly tagged) name does not end in
+                 ``_gpt`` (used for the primary runs_dir to hide non-GPT runs).
+    """
     if not runs_dir.exists():
         return []
     found: list[tuple[str, Path]] = []
     for run_path in sorted(runs_dir.iterdir()):
         if not run_path.is_dir():
             continue
-        if only and run_path.name != only:
+        name = run_path.name
+        if only and name not in only:
             continue
         report_dir = run_path / "report"
         index = report_dir / "index.html"
         if index.exists():
-            found.append((run_path.name, report_dir))
+            if gpt_tag and not name.endswith("_gpt"):
+                name = name + "_gpt"
+            if gpt_only and not name.endswith("_gpt"):
+                continue
+            found.append((name, report_dir))
     return found
+
+
+def _collect_reports(
+    runs_dir: Path,
+    extra_runs_dirs: list[Path],
+    only: set[str] | None,
+) -> list[tuple[str, Path]]:
+    """Merge reports from runs_dir and any extra_runs_dirs; main dir wins on name collision.
+
+    Primary runs_dir: only GPT-tagged runs (ending in ``_gpt``) are included
+    so non-GPT model runs are hidden from the website.
+
+    Extra runs_dirs: treated as GPT-only sources — run names without ``_gpt``
+    get that suffix appended (e.g. tejas's ``l12_default`` → ``l12_default_gpt``).
+    """
+    seen: dict[str, Path] = {}
+    for name, report_dir in _find_reports(runs_dir, only, gpt_only=True):
+        seen[name] = report_dir
+    for d in extra_runs_dirs:
+        for name, report_dir in _find_reports(d, only, gpt_tag=True):
+            if name in seen:
+                print(f"[publish] duplicate run '{name}' in {d}; keeping first occurrence")
+            else:
+                seen[name] = report_dir
+    return sorted(seen.items())
 
 
 def _copy_report(src: Path, dst: Path) -> None:
@@ -355,30 +401,33 @@ _VARIANT_COLS = [
 
 # Map from row key -> display label, so the matrix shows nicer row names.
 _ROW_LABELS = {
-    "l12": "L1 + L2",
-    "l34": "L3 + L4",
+    "l1": "Level 1",
+    "l2": "Level 2",
+    "l3": "Level 3",
+    "l4": "Level 4",
 }
 
 
-def _classify_run(name: str) -> tuple[str | None, str | None]:
-    """Bucket a run name into a (row, column) for the comparison matrix.
+def _classify_run(name: str) -> list[tuple[str, str]]:
+    """Return (row, col) pairs placing this run in the comparison matrix.
 
-    Recognizes the new naming (`l12_single`, `l12_default`, `l12_all`,
-    `l34_*`) and the legacy KernelBench naming (`cuda_*_single_turn`,
-    `cuda_*_multi_turn_default`, `cuda_*_multi_turn_all`). Anything else
-    is bucketed as (None, None) and shown only in the flat list.
+    A run covering multiple levels (e.g. l12_all) returns one pair per level
+    so it appears in every matching row.  Runs that don't follow either naming
+    convention return [].
+
+    Supported patterns
+    ------------------
+    New:    l<levels>_<tier>[_gpt]   e.g. l12_all, l123_single_gpt, l3_default_gpt
+    Legacy: cuda_*_single_turn | cuda_*_multi_turn_default | cuda_*_multi_turn_all
     """
-    # New naming: <row>_<col> where col is single | default | all.
-    for col_key, _ in _VARIANT_COLS:
-        suffix = "_" + col_key
-        if name.endswith(suffix):
-            row = name[: -len(suffix)]
-            # Strip a leading "cuda_" if present (legacy compat).
-            if row.startswith("cuda_"):
-                row = row[len("cuda_"):]
-            # Map known rows to a nicer label; unknown rows pass through
-            # as their literal value.
-            return row, col_key
+    # New naming: l<levels>_<tier>_gpt  (_gpt suffix required for matrix placement)
+    # levels = one or more digits, each digit is a level (e.g. "12" → l1, l2)
+    m = re.match(r'^l(\d+)_(single|default|all)_gpt$', name)
+    if m:
+        level_digits = m.group(1)
+        tier_raw = m.group(2)
+        rows = [f"l{d}" for d in level_digits]
+        return [(row, tier_raw) for row in rows]
     # Legacy naming: ends with single_turn / multi_turn_default / multi_turn_all.
     for legacy_suffix, col_key in (
         ("_single_turn", "single"),
@@ -389,8 +438,8 @@ def _classify_run(name: str) -> tuple[str | None, str | None]:
             row = name[: -len(legacy_suffix)]
             if row.startswith("cuda_"):
                 row = row[len("cuda_"):]
-            return row, col_key
-    return None, None
+            return [(row, col_key)]
+    return []
 
 
 def _row_label(row: str) -> str:
@@ -404,12 +453,10 @@ def _build_experiments(worktree: Path, reports: list[tuple[str, Path]]) -> None:
     rows_seen: list[str] = []
     flat = sorted(name for name, _ in reports)
     for name in flat:
-        row, col = _classify_run(name)
-        if row is None or col is None:
-            continue
-        if row not in rows_seen:
-            rows_seen.append(row)
-        by_cell.setdefault((row, col), []).append(name)
+        for row, col in _classify_run(name):
+            if row not in rows_seen:
+                rows_seen.append(row)
+            by_cell.setdefault((row, col), []).append(name)
     rows_seen.sort()
 
     matrix = ""
@@ -424,7 +471,7 @@ def _build_experiments(worktree: Path, reports: list[tuple[str, Path]]) -> None:
                     cells.append('<td class="cell cell-empty">—</td>')
                 else:
                     inner = "".join(
-                        f'<a href="{html.escape(n)}/index.html">'
+                        f'<a href="{html.escape(n)}/{html.escape(row)}/index.html">'
                         f'<span class="cell-name">{html.escape(n)}</span>'
                         f'<span class="cell-hint">open →</span></a>'
                         for n in names
@@ -636,8 +683,27 @@ main.wrap h2{font-family:"neue-kabel",sans-serif;font-weight:900;font-size:32px;
     )
 
 
-def _rebuild_reports(reports: list[tuple[str, Path]]) -> None:
+def _gpt_models_for_run(run_dir: Path) -> list[str]:
+    """Read sweep_config.json and return model names that look like GPT models."""
+    cfg = run_dir / "sweep_config.json"
+    if not cfg.exists():
+        return []
+    try:
+        data = json.loads(cfg.read_text())
+        return [m["name"] for m in data.get("models", [])
+                if "gpt" in m.get("name", "").lower()]
+    except Exception:
+        return []
+
+
+def _rebuild_reports(
+    reports: list[tuple[str, Path]], runs_dir: Path
+) -> list[tuple[str, Path]]:
     """Re-run build_report.py against every detected run before copying.
+
+    Returns an updated reports list where read-only sources have their
+    report_dir replaced with a freshly-built temp directory so level indexes
+    and other generated files are always present.
 
     Why subprocess instead of importing build_report directly: the running
     sweep already has build_report imported into its own process and Python
@@ -646,16 +712,50 @@ def _rebuild_reports(reports: list[tuple[str, Path]]) -> None:
     every cycle uses the latest code on disk — no sweep restart required.
     """
     builder = REPO_ROOT / "scripts" / "build_report.py"
+    updated: list[tuple[str, Path]] = []
     for name, report_dir in reports:
         run_dir = report_dir.parent  # runs/{name}/
+        owned = True
         try:
-            subprocess.run(
-                ["uv", "run", "python", str(builder), str(run_dir)],
-                cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            tail = (e.stderr or "").strip()[-500:]
-            print(f"[publish] build_report failed for {name}: {tail}")
+            run_dir.relative_to(runs_dir)
+        except ValueError:
+            owned = False
+
+        if owned:
+            try:
+                subprocess.run(
+                    ["uv", "run", "python", str(builder), str(run_dir)],
+                    cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                tail = (e.stderr or "").strip()[-500:]
+                print(f"[publish] build_report failed for {name}: {tail}")
+            updated.append((name, report_dir))
+        else:
+            # Read-only source: build into a temp dir so we still get level indexes.
+            # Wipe first so stale files from a previous (unfiltered) build don't persist.
+            tmp = REPO_ROOT.parent / f"{REPO_ROOT.name}-tmp-report-{name}"
+            if tmp.exists():
+                shutil.rmtree(tmp)
+            tmp.mkdir(parents=True)
+            gpt_models = _gpt_models_for_run(run_dir)
+            cmd = ["uv", "run", "python", str(builder), str(run_dir),
+                   "--output-dir", str(tmp)]
+            if gpt_models:
+                cmd += ["--models", ",".join(gpt_models)]
+            try:
+                subprocess.run(
+                    cmd,
+                    cwd=str(REPO_ROOT), check=True, capture_output=True, text=True,
+                )
+                print(f"[publish] built read-only report for {name} → {tmp}"
+                      + (f" (models: {gpt_models})" if gpt_models else ""))
+                updated.append((name, tmp))
+            except subprocess.CalledProcessError as e:
+                tail = (e.stderr or "").strip()[-500:]
+                print(f"[publish] build_report failed for {name}: {tail}")
+                updated.append((name, report_dir))  # fall back to existing
+    return updated
 
 
 def _has_changes(worktree: Path) -> bool:
@@ -663,16 +763,17 @@ def _has_changes(worktree: Path) -> bool:
     return bool(res.stdout.strip())
 
 
-def publish_once(*, runs_dir: Path, branch: str, worktree: Path,
-                 only: str | None) -> bool:
+def publish_once(*, runs_dir: Path, extra_runs_dirs: list[Path], branch: str,
+                 worktree: Path, only: set[str] | None) -> bool:
     """Returns True when something was pushed, False when there were no changes."""
     print(f"\n[publish] sync at {_dt.datetime.utcnow().isoformat(timespec='seconds')}Z")
     _ensure_gh_pages_branch(branch)
     _ensure_worktree(branch, worktree)
 
-    reports = _find_reports(runs_dir, only)
+    reports = _collect_reports(runs_dir, extra_runs_dirs, only)
     if not reports:
-        print(f"[publish] no reports found under {runs_dir} "
+        all_dirs = [runs_dir, *extra_runs_dirs]
+        print(f"[publish] no reports found under {', '.join(str(d) for d in all_dirs)} "
               f"(looked for runs/*/report/index.html)")
         return False
     print(f"[publish] found {len(reports)} report(s): "
@@ -682,7 +783,7 @@ def publish_once(*, runs_dir: Path, branch: str, worktree: Path,
     # immediately — the running sweep's in-process build_report cache misses
     # updates, but the publisher's subprocess invocation does not.
     print("[publish] rebuilding reports from latest build_report.py …")
-    _rebuild_reports(reports)
+    reports = _rebuild_reports(reports, runs_dir)
 
     for name, src in reports:
         dst = worktree / name
@@ -712,8 +813,12 @@ def parse_args() -> argparse.Namespace:
                    help="GitHub Pages branch (default: gh-pages).")
     p.add_argument("--worktree", default=str(DEFAULT_WORKTREE),
                    help="Path to the git worktree used for publishing.")
-    p.add_argument("--run", default=None,
-                   help="Restrict to a single run name (default: publish all).")
+    p.add_argument("--run", default=None, action="append", dest="runs",
+                   metavar="RUN",
+                   help="Restrict to this run name; may be repeated to publish multiple runs.")
+    p.add_argument("--extra-runs-dir", default=[], action="append", dest="extra_runs_dirs",
+                   metavar="DIR",
+                   help="Additional directory to scan for runs/*/report/; may be repeated.")
     p.add_argument("--watch", type=int, default=0, metavar="SECONDS",
                    help="Loop forever, republishing every SECONDS. 0 = one-shot.")
     return p.parse_args()
@@ -722,12 +827,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     runs_dir = Path(args.runs_dir).resolve()
+    extra_runs_dirs = [Path(d).resolve() for d in args.extra_runs_dirs]
+    if not extra_runs_dirs:
+        extra_runs_dirs = [d for d in DEFAULT_EXTRA_RUNS_DIRS if d.exists()]
     worktree = Path(args.worktree).resolve()
 
     while True:
         try:
-            publish_once(runs_dir=runs_dir, branch=args.branch,
-                         worktree=worktree, only=args.run)
+            publish_once(runs_dir=runs_dir, extra_runs_dirs=extra_runs_dirs,
+                         branch=args.branch, worktree=worktree,
+                         only=set(args.runs) if args.runs else None)
         except subprocess.CalledProcessError as e:
             print(f"[publish] command failed: {e}", file=sys.stderr)
             # don't exit the watch loop on a transient git error

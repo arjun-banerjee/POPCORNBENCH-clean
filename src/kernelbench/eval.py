@@ -599,7 +599,15 @@ def eval_kernel_against_ref(
         )
         # TODO: add metadata for compilation error (how to we get the compilation error message?)
 
-        if "lock" in str(e) or "No such file or directory" in str(e):
+        err_str = str(e)
+        # A missing .so after a ninja failure is a real compile error (ninja ran but
+        # produced no output) — don't retry, record it.  Only treat "No such file or
+        # directory" as retryable when it's NOT the compiled shared library that's
+        # absent (e.g. a missing lock-file path).
+        _is_lock_contention = "lock" in err_str or (
+            "No such file or directory" in err_str and ".so" not in err_str
+        )
+        if _is_lock_contention:
             # this is a lock file error, likely due to concurrent compilation
             # this does not necessarily mean the compilation failed, but we should retry
             print(

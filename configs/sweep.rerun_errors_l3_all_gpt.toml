@@ -1,0 +1,51 @@
+# Single-pass rerun for l3_all_gpt original-variant errors (popcorn had none).
+# 13 errors: P1, P6, P18, P20, P22, P34, P35, P39, P42, P45, P47, P49, P50
+#
+#   uv run python scripts/run_sweep.py configs/sweep.rerun_errors_l3_all_gpt.toml
+
+[run]
+name              = "l3_all_gpt"    # writes into the same run folder — replaces error trajectories
+runs_dir          = "runs"
+dataset_src       = "local"
+variants          = ["original"]
+levels            = [3]
+force_rerun       = true            # overwrite finished (errored) trajectories
+backend           = "cuda"
+precision         = "fp32"
+gpu_arch          = ["Hopper"]
+timing_method     = "cuda_event"
+num_correct_trials = 5
+num_perf_trials   = 100
+tools             = "all" # single-pass: no feedback loop
+
+[run.problem_subset_by_level]
+3 = [1, 6, 18, 20, 22, 34, 35, 39, 42, 45, 47, 49, 50]
+
+[agent]
+max_turns          = 15
+max_tool_calls     = 50
+warn_turns_remaining = 0
+turn_delay_s       = 0.0
+reasoning_effort   = "medium"
+
+[parallelism]
+num_gpu_devices    = 8
+agents_per_gpu     = 1
+perf_lock_per_gpu  = true
+worker_timeout_s   = 600
+
+[report]
+enabled            = true
+refresh_seconds    = 30
+serve              = true
+serve_host         = "0.0.0.0"
+serve_port         = 8765
+
+[[models]]
+name               = "gpt-5.5-priority"
+api_kind           = "openai"
+base_url           = "https://popcorn-centralus-resource.services.ai.azure.com/openai/v1/"
+api_key_env        = "POPCORN_CENTRAL_AZURE_KEY"
+rpm                = 250
+tpm                = 250000
+reasoning_effort   = "medium"

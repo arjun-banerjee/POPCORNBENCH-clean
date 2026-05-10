@@ -40,9 +40,42 @@ from tqdm import tqdm
 
 from kernelbench.agent import KernelAgent, get_tools
 from kernelbench.dataset import construct_kernelbench_dataset
+from kernelbench.hardware_translation_io import (
+    load_io_contract_from_toml,
+    load_oracle_reference_source,
+)
+from kernelbench.prompt_constructor_toml import get_hardware_translation_prompt
 from kernelbench.utils import set_gpu_arch
 
 REPO_TOP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _load_source_kernel(run_cfg: dict, problem, level: int) -> str:
+    """Load a source kernel file for hardware_translation prompt_option."""
+    src_dir = run_cfg.get("source_kernel_dir")
+    if src_dir:
+        if not os.path.isabs(src_dir):
+            src_dir = os.path.join(REPO_TOP_DIR, src_dir)
+    else:
+        backend = run_cfg.get("source_backend") or run_cfg["backend"]
+        src_dir = os.path.join(
+            REPO_TOP_DIR, "KernelBench", f"level{level}", "_translation_sources", backend
+        )
+    candidate = os.path.join(src_dir, problem.name)
+    if not os.path.exists(candidate):
+        stem = os.path.splitext(problem.name)[0]
+        for ext in (".cu", ".cuh"):
+            alt = os.path.join(src_dir, stem + ext)
+            if os.path.exists(alt):
+                candidate = alt
+                break
+        else:
+            raise FileNotFoundError(
+                f"No source kernel for '{problem.name}' under {src_dir}. "
+                "Tried .py, .cu, .cuh extensions."
+            )
+    with open(candidate) as f:
+        return f.read()
 
 
 @dataclass
@@ -282,7 +315,8 @@ def run_one(
     # Skip if a *finished* trajectory already exists. In-progress snapshots
     # (outcome == "in_progress", finished_at == None) get re-run — they're
     # leftovers from a killed sweep, not real completions.
-    if os.path.exists(traj_path):
+    # Set run.force_rerun = true in the TOML to overwrite finished trajectories.
+    if os.path.exists(traj_path) and not run_cfg.get("force_rerun", False):
         try:
             with open(traj_path) as f:
                 d = json.load(f)
@@ -339,6 +373,32 @@ def run_one(
 
             precision = _force_backend_precision(run_cfg["backend"], run_cfg["precision"])
 
+            # Build a custom initial message + eval reference for hw_translation mode.
+            initial_message = None
+            eval_ref_src = problem.code
+            if run_cfg.get("prompt_option") == "hardware_translation":
+                source_kernel_src = _load_source_kernel(run_cfg, problem, work.level)
+                io_dir = run_cfg.get("hardware_translation_io_dir")
+                oracle_dir = run_cfg.get("hardware_translation_oracle_dir")
+                io_contract = load_io_contract_from_toml(
+                    repo_top=REPO_TOP_DIR,
+                    io_dir=io_dir,
+                    problem_name=problem.name,
+                )
+                initial_message = get_hardware_translation_prompt(
+                    io_contract_src=io_contract,
+                    source_kernel_src=source_kernel_src,
+                    backend=run_cfg["backend"],
+                    source_gpu_name=run_cfg["source_hardware_gpu_name"],
+                    target_gpu_name=run_cfg["hardware_gpu_name"],
+                    precision=precision,
+                )
+                eval_ref_src = load_oracle_reference_source(
+                    repo_top=REPO_TOP_DIR,
+                    oracle_dir=oracle_dir,
+                    problem_name=problem.name,
+                )
+
             # Wire up the eval RPC client if the runner spawned per-GPU
             # eval servers. The client routes submit_kernel through the
             # FIFO queue so agents don't hold the GPU for minutes during
@@ -357,7 +417,7 @@ def run_one(
                 problem_id=work.problem_id,
                 level=work.level,
                 problem_name=problem.name,
-                ref_arch_src=problem.code,
+                ref_arch_src=eval_ref_src,
                 client=client,
                 model=model_cfg.get("deployment_name", model_name),
                 run_name=run_cfg["name"],
@@ -379,6 +439,7 @@ def run_one(
                 api_kind=api_kind,
                 save_path=traj_path,
                 eval_client=eval_client,
+                initial_message=initial_message,
             )
 
             # Lock fallback: when the eval queue is NOT in use (e.g. legacy
@@ -594,6 +655,20 @@ def main():
     # Build (model, level, variant, problem) matrix
     levels = run_cfg["levels"]
     subset = set(run_cfg.get("problem_subset") or [])
+    # Optional per-level override: problem_subset_by_level = {1 = [...], 2 = [...]}
+    # Falls back to problem_subset when a level has no entry.
+    subset_by_level = {
+        int(k): set(v)
+        for k, v in run_cfg.get("problem_subset_by_level", {}).items()
+    }
+    # Optional per-variant+level override:
+    #   [run.problem_subset_by_variant_level.popcorn]
+    #   1 = [13, 19, ...]
+    # Takes precedence over subset_by_level, which takes precedence over subset.
+    subset_by_variant_level = {
+        v: {int(k): set(ids) for k, ids in lmap.items()}
+        for v, lmap in run_cfg.get("problem_subset_by_variant_level", {}).items()
+    }
     multi_gpu_mode = bool(par_cfg.get("multi_gpu", False))
 
     # Problems that require all GPUs to evaluate (NCCL collectives, real
@@ -619,7 +694,14 @@ def main():
                 variant=variant,
             )
             all_pids = ds.get_problem_ids()
-            pids = [p for p in all_pids if (not subset) or (p in subset)]
+            vl_map = subset_by_variant_level.get(variant, {})
+            if int(level) in vl_map:
+                effective_subset = vl_map[int(level)]
+            elif int(level) in subset_by_level:
+                effective_subset = subset_by_level[int(level)]
+            else:
+                effective_subset = subset
+            pids = [p for p in all_pids if (not effective_subset) or (p in effective_subset)]
 
             # Filter the multi-GPU problems based on the run mode:
             # - non-multi_gpu run: drop them (they would crash trying to

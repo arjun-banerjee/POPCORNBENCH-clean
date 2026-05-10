@@ -196,16 +196,23 @@ def query_server(
     raise RuntimeError("query_server: exceeded max retries")
 
 
+def _uses_max_completion_tokens(model_name: str) -> bool:
+    """Return True for models that require max_completion_tokens instead of max_tokens."""
+    name = model_name.lower()
+    return "gpt-5.5" in name
+
+
 def _query_server_once(
     model_name, messages, max_tokens, num_completions,
     temperature, top_p, top_k, is_reasoning_model,
     reasoning_effort, budget_tokens,
 ):
     try:
+        tokens_key = "max_completion_tokens" if _uses_max_completion_tokens(model_name) else "max_tokens"
         completion_kwargs = {
             "model": model_name,
             "messages": messages,
-            "max_tokens": max_tokens,
+            tokens_key: max_tokens,
             "n": num_completions,
         }
         
@@ -238,6 +245,12 @@ def _query_server_once(
             ):
                 completion_kwargs["top_k"] = top_k
         
+        # If a custom base URL is set, pass it directly so LiteLLM uses it
+        # (e.g. Azure endpoints served via the OpenAI-compatible /openai/v1/ path).
+        api_base = os.environ.get("OPENAI_API_BASE")
+        if api_base:
+            completion_kwargs["api_base"] = api_base
+
         response = completion(**completion_kwargs)
         
         # output processing
