@@ -595,14 +595,17 @@ class KernelAgent:
                 # metadata — in those cases let the model retry.
                 if tool_name == "submit_kernel":
                     submitted_kernel = args.get("kernel_code")
-                    meta = tool_result.metadata or {}
-                    if "compiled" in meta and "correctness" in meta:
+                    if self._finalize_from_submit_result(tool_result):
                         is_final = True
-                        try:
-                            self._final_result = KernelExecResult(**meta)
-                        except Exception:
-                            self._final_result = None
                         break
+
+            if not is_final:
+                is_final, auto_kernel = self._maybe_autofinalize_last_turn(
+                    turn_idx=turn_idx,
+                    executed_tool_calls=executed_tool_calls,
+                )
+                if auto_kernel:
+                    submitted_kernel = auto_kernel
 
             turn = KernelTurn(
                 turn_id=turn_idx,
@@ -643,6 +646,71 @@ class KernelAgent:
                 ),
                 metadata={"unexpected_error": str(e)},
             )
+
+    def _finalize_from_submit_result(self, tool_result: ToolResult) -> bool:
+        """Record a submit_kernel result as the run's final outcome when valid."""
+        meta = tool_result.metadata or {}
+        if "compiled" not in meta or "correctness" not in meta:
+            return False
+        try:
+            self._final_result = KernelExecResult(**meta)
+        except Exception:
+            self._final_result = None
+        return True
+
+    def _maybe_autofinalize_last_turn(
+        self,
+        *,
+        turn_idx: int,
+        executed_tool_calls: list[ToolCall],
+    ) -> tuple[bool, str | None]:
+        """On the last turn, auto-submit a kernel that just passed correctness.
+
+        This is a harness-side safety net for runs that spend their final tool
+        call on `run_correctness` and would otherwise finish as `error` despite
+        already having a correct kernel in hand.
+        """
+        if turn_idx != self.max_turns - 1 or not executed_tool_calls:
+            return False, None
+
+        last_call = executed_tool_calls[-1]
+        if (
+            last_call.tool_name != "run_correctness"
+            or not last_call.success
+            or not (last_call.metadata or {}).get("compiled")
+            or not (last_call.metadata or {}).get("correctness")
+        ):
+            return False, None
+
+        kernel_code = last_call.args.get("kernel_code")
+        if not isinstance(kernel_code, str) or not kernel_code:
+            return False, None
+
+        submit_tool = self.tool_map.get("submit_kernel")
+        if submit_tool is None:
+            return False, None
+
+        tag = self._tag()
+        _t_tool = time.time()
+        tool_result = self._execute_tool(submit_tool, {"kernel_code": kernel_code})
+        _tool_dt = time.time() - _t_tool
+        print(
+            f"{tag}   submit_kernel {'OK' if tool_result.success else 'FAIL'} "
+            f"({_tool_dt:.1f}s) [auto-finalize]",
+            flush=True,
+        )
+        self._total_tool_calls += 1
+        executed_tool_calls.append(
+            ToolCall(
+                tool_name="submit_kernel",
+                args={"kernel_code": kernel_code},
+                result_text=tool_result.output,
+                success=tool_result.success,
+                metadata=tool_result.metadata,
+            )
+        )
+
+        return self._finalize_from_submit_result(tool_result), kernel_code
 
     # -----------------------------------------------------------------------
     # Chat Completions code path
@@ -983,14 +1051,17 @@ class KernelAgent:
 
                 if tool_name == "submit_kernel":
                     submitted_kernel = args.get("kernel_code")
-                    meta = tool_result.metadata or {}
-                    if "compiled" in meta and "correctness" in meta:
+                    if self._finalize_from_submit_result(tool_result):
                         is_final = True
-                        try:
-                            self._final_result = KernelExecResult(**meta)
-                        except Exception:
-                            self._final_result = None
                         break
+
+            if not is_final:
+                is_final, auto_kernel = self._maybe_autofinalize_last_turn(
+                    turn_idx=turn_idx,
+                    executed_tool_calls=executed_tool_calls,
+                )
+                if auto_kernel:
+                    submitted_kernel = auto_kernel
 
             trajectory.add_turn(
                 KernelTurn(
