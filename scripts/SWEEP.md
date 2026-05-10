@@ -7,7 +7,7 @@ perf-timing locks, and a live self-refreshing HTML report.
 ## TLDR
 
 ```bash
-# 1. Drop API keys in .env (TEJAS_AZURE_KEY, THAVA_AZURE_KEY, POPCORN_AZURE_KEY, etc.).
+# 1. Drop API keys in .env (TEJAS_AZURE_KEY, THAVA_AZURE_KEY, POPCORN_AZURE_KEY, XAI_API_KEY for Grok, etc.).
 # 2. Edit configs/sweep.example.toml to taste.
 # 3. Run.
 uv run python scripts/run_sweep.py configs/sweep.example.toml
@@ -149,8 +149,8 @@ have real token usage numbers.
 
 | `api_kind`    | Endpoint shape       | Used for                                                |
 |---------------|----------------------|---------------------------------------------------------|
-| `openai`      | Responses API        | gpt-5.x family (supports `reasoning_effort`)            |
-| `openai_chat` | Chat Completions     | FW-GLM-5-1, Llama-Maverick, Kimi-K2.x, generic OpenAI   |
+| `openai`      | Responses API        | gpt-5.x (supports `reasoning_effort`)                    |
+| `openai_chat` | Chat Completions     | FW-GLM-5-1, Llama-Maverick, Kimi-K2.x, **xAI Grok**, generic OpenAI-compatible servers |
 
 The two paths share tools, prompts, and trajectory format — only the wire
 protocol differs. Models that emit a Chat-Completions `reasoning_content`
@@ -196,6 +196,37 @@ base_url = "https://thava-openai.services.ai.azure.com/models"
 api_kind = "openai_chat"
 ```
 
+### xAI Grok (`https://api.x.ai/v1`)
+
+[Grok](https://x.ai/) uses the **OpenAI Python SDK** with `base_url =
+"https://api.x.ai/v1"`. For **KernelBench’s multi-turn tool agent**, use **`api_kind
+= "openai_chat"`** (Chat Completions).
+
+**Do not use `api_kind = "openai"` (Responses)** for Grok in this harness: after
+the first turn the agent resends OpenAI Responses-shaped **`input`** items
+(`function_call_output`, `reasoning`, …). xAI’s Responses server deserializes
+that payload with a stricter `ModelInput` type and returns **422 /
+UnprocessableEntityError** (`data did not match any variant of untagged enum
+ModelInput`). Chat Completions uses ordinary `messages` (`system` / `user` /
+`assistant` / `tool`), which Grok accepts.
+
+Docs: [xAI — chat](https://docs.x.ai/docs/guides/chat); reference hub: [Grok API (Apidog)](https://grok-api.apidog.io/).
+
+Create an API key in the [xAI console](https://console.x.ai) and export it:
+
+```bash
+export XAI_API_KEY="xai-..."
+```
+
+Minimal checked-in sweep: **`configs/sweep.grok.toml`**. Typical knobs: **`request_timeout_s`** (e.g. `3600`), **`deployment_name`** if the wire model id differs from `name`.
+
+If you only want to ping the endpoint:
+
+```bash
+# optional: export XAI_MODEL=grok-4.3   # default if unset
+uv run python scripts/probe_endpoints.py --xai-only
+```
+
 ### Verified working today
 
 | Model                                    | base_url                                          | api_kind     |
@@ -205,6 +236,7 @@ api_kind = "openai_chat"
 | FW-GLM-5-1                               | `popcorn-foundry-resource.openai.azure.com/openai/v1/` | `openai_chat`|
 | Llama-4-Maverick-17B-128E-Instruct-FP8   | `thava-…services.ai.azure.com/models`             | `openai_chat`|
 | Kimi-K2.6                                | `thava-…services.ai.azure.com/models`             | `openai_chat`|
+| Grok (e.g. `grok-4.3`)                   | `https://api.x.ai/v1`                             | `openai_chat` |
 
 ### Quirks worth knowing
 
@@ -227,6 +259,11 @@ api_kind = "openai_chat"
 - **`reasoning_effort` is silently ignored** when `api_kind = "openai_chat"`.
   Chat Completions has no `reasoning.effort` field. Set it on the gpt-5.x
   entries only.
+- **xAI Grok** — use `api_kind = "openai_chat"` with `base_url =
+  "https://api.x.ai/v1"` and `api_key_env = "XAI_API_KEY"`. Using `api_kind =
+  "openai"` hits Responses with multi-turn tool payloads OpenAI’s SDK emits;
+  xAI often returns **422 ModelInput** deserialization errors. See
+  `configs/sweep.grok.toml` and `uv run python scripts/probe_endpoints.py --xai-only`.
 - **Rotate any key that lands in the working tree.** `tmp.py` and similar
   scratch files are not committed but they're on disk; treat any key inside
   them as compromised.
@@ -449,11 +486,13 @@ you want to run.
 | Key                | Type   | Default                                                      | Notes |
 |--------------------|--------|--------------------------------------------------------------|-------|
 | `name`             | string | **req**                                                      | Display name. Also used as the directory under `runs/{name}/{variant}/{name}/`. |
-| `api_kind`         | string | `"openai"`                                                   | `"openai"` for the Responses API (gpt-5.x), `"openai_chat"` for Chat Completions (FW-GLM-5-1, Llama-Maverick, Kimi). |
+| `api_kind`         | string | `"openai"`                                                   | `"openai"` for Responses API (gpt-5.x). Use `"openai_chat"` for Chat Completions (Grok, GLM, Llama-Maverick, Kimi, …). |
 | `base_url`         | string | **req**                                                      | The full endpoint URL; for Azure include `?api-version=...`. |
 | `api_key_env`      | string | **req**                                                      | Name of the env var holding the API key. The runner reads `os.environ[api_key_env]`. |
 | `deployment_name`  | string | falls back to `name`                                         | If your Azure deployment name differs from the display name, put the deployment name here. |
 | `reasoning_effort` | string | inherits `[agent].reasoning_effort`                          | Per-model override. Only meaningful for `api_kind = "openai"`. |
+| `omit_responses_reasoning` | bool | `false` | If `true`, omit the `reasoning` field on `responses.create`. Occasionally useful for strict Responses gateways; **not used for Grok** (use `openai_chat` instead). |
+| `request_timeout_s` | float | SDK default | HTTP timeout (seconds) for the OpenAI client. Use a large value (e.g. `3600`) for slow Grok / reasoning models. |
 | `rpm`              | int    | `250`                                                        | Requests-per-minute budget for this model. Currently informational; concurrency is capped via `tpm` (see below). |
 | `tpm`              | int    | `250000`                                                     | Tokens-per-minute budget. Default per-model concurrency is `tpm / 25_000` (≈10k tokens/turn × 2.5× safety). |
 | `max_concurrency`  | int    | derived from `tpm`                                           | Hard cap on in-flight LLM calls for this model. Override once you've measured real token usage per turn. |
@@ -478,6 +517,8 @@ Before a long run, sanity-check that every key + URL combination still works:
 
 ```bash
 uv run python scripts/probe_endpoints.py
+# xAI Grok only (needs XAI_API_KEY; optional XAI_MODEL):
+# uv run python scripts/probe_endpoints.py --xai-only
 # OK    gpt-5.4-pro                             openai       pong
 # OK    gpt-5.5                                 openai       pong
 # OK    FW-GLM-5-1                              openai_chat  Pong!

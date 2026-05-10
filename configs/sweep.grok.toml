@@ -1,0 +1,60 @@
+# Grok (xAI) — minimal sweep for smoke / development.
+#
+# Prerequisites:
+#   export XAI_API_KEY="xai-..."
+# Confirm the model id in https://console.x.ai (override `deployment_name` if it
+# differs from `name`).
+#
+# Smoke (API + one GPU problem):
+#   uv run python scripts/run_sweep.py configs/sweep.grok.toml
+#
+# Endpoint probe only (no GPU eval):
+#   uv run python scripts/probe_endpoints.py --xai-only
+
+[run]
+name              = "grok_smoke_mt"
+runs_dir          = "runs"
+dataset_src       = "local"
+dataset_name      = "ScalingIntelligence/KernelBench"
+variants          = ["original"]
+levels            = [1]
+problem_subset    = [1]
+backend           = "cuda"
+precision         = "fp32"
+gpu_arch          = ["Hopper"]
+timing_method     = "cuda_event"
+num_correct_trials = 3
+num_perf_trials   = 20
+tools             = "all"
+
+[agent]
+max_turns          = 15
+max_tool_calls     = 30
+warn_turns_remaining = 1
+turn_delay_s       = 0.0
+reasoning_effort   = "medium"
+
+[parallelism]
+num_gpu_devices    = 1
+agents_per_gpu     = 1
+perf_lock_per_gpu  = true
+
+[report]
+enabled            = true
+refresh_seconds    = 60
+serve              = false
+
+# xAI Grok: use Chat Completions (`openai_chat`), not the Responses API.
+# Our Responses path sends OpenAI-style multi-turn items (function_call_output,
+# reasoning, …) that xAI's server rejects with errors like:
+#   ModelInput / Failed to deserialize the JSON body
+# Chat uses plain role/content/tool messages — same as other OpenAI-compatible hosts.
+[[models]]
+name                     = "grok-4.3"
+api_kind                 = "openai_chat"
+base_url                 = "https://api.x.ai/v1"
+api_key_env              = "XAI_API_KEY"
+deployment_name          = "grok-4.3"
+request_timeout_s        = 3600
+rpm                      = 60
+tpm                      = 200000

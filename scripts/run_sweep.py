@@ -454,6 +454,9 @@ def run_one(
                     else None
                 ),
                 llm_concurrency_semaphore=llm_global_sem,
+                omit_responses_reasoning=bool(
+                    model_cfg.get("omit_responses_reasoning", False)
+                ),
             )
 
             # Lock fallback: when the eval queue is NOT in use (e.g. legacy

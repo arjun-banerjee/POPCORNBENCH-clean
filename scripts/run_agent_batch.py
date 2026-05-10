@@ -64,6 +64,7 @@ class AgentBatchConfig(Config):
         self.openai_api_key_env = "OPENAI_API_KEY"
         self.openai_base_url = None  # None = openai.com; set for Azure / gateways
         self.reasoning_effort = None  # None | "minimal" | "low" | "medium" | "high"
+        self.omit_responses_reasoning = False  # true for xAI Grok Responses API
 
         # ---- Agent loop ----
         self.max_turns = 10
@@ -226,6 +227,7 @@ def run_agent_worker(
             warn_turns_remaining=config.warn_turns_remaining,
             turn_delay_s=float(config.turn_delay_s),
             verbose=config.verbose,
+            omit_responses_reasoning=config.omit_responses_reasoning,
         )
 
         trajectory = agent.run()

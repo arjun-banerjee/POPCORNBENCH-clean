@@ -5,13 +5,17 @@ Sends one trivial request through the OpenAI Python SDK at each
 
 Run from repo root:
     uv run python scripts/probe_endpoints.py
+
+xAI Grok only (requires XAI_API_KEY; optional XAI_MODEL, default grok-4.3).
+Uses Chat Completions — same path as configs/sweep.grok.toml:
+    uv run python scripts/probe_endpoints.py --xai-only
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
-import traceback
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -90,11 +94,23 @@ def _try(label, fn):
         return f"  {label}: FAIL ({type(e).__name__}: {str(e)[:120]})"
 
 
-def probe(name, api_kind, base_url, key_env, model):
+def probe(
+    name,
+    api_kind,
+    base_url,
+    key_env,
+    model,
+    *,
+    timeout: float | None = None,
+    skip_responses_reasoning_probe: bool = False,
+):
     key = os.environ.get(key_env)
     if not key:
         return False, [f"env var {key_env} not set"]
-    client = OpenAI(api_key=key, base_url=base_url)
+    client_kw: dict = {"api_key": key, "base_url": base_url}
+    if timeout is not None:
+        client_kw["timeout"] = timeout
+    client = OpenAI(**client_kw)
     results = []
     if api_kind == "openai":
         results.append(
@@ -124,18 +140,19 @@ def probe(name, api_kind, base_url, key_env, model):
                 ),
             )
         )
-        results.append(
-            _try(
-                "with tools + reasoning.effort=low",
-                lambda: client.responses.create(
-                    model=model,
-                    instructions="Be terse.",
-                    input=[{"role": "user", "content": "ping"}],
-                    tools=[_DUMMY_TOOL_RESPONSES],
-                    reasoning={"effort": "low"},
-                ),
+        if not skip_responses_reasoning_probe:
+            results.append(
+                _try(
+                    "with tools + reasoning.effort=low",
+                    lambda: client.responses.create(
+                        model=model,
+                        instructions="Be terse.",
+                        input=[{"role": "user", "content": "ping"}],
+                        tools=[_DUMMY_TOOL_RESPONSES],
+                        reasoning={"effort": "low"},
+                    ),
+                )
             )
-        )
     else:
         results.append(
             _try(
@@ -164,7 +181,33 @@ def probe(name, api_kind, base_url, key_env, model):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--xai-only",
+        action="store_true",
+        help="Only run xAI Grok probes (set XAI_API_KEY; optional XAI_MODEL)",
+    )
+    args = parser.parse_args()
     load_dotenv(override=False)
+
+    if args.xai_only:
+        model = os.environ.get("XAI_MODEL", "grok-4.3")
+        print(f"\nGrok (xAI)  (openai_chat)  model={model}")
+        ok, detail = probe(
+            "Grok (xAI)",
+            "openai_chat",
+            "https://api.x.ai/v1",
+            "XAI_API_KEY",
+            model,
+            timeout=120.0,
+        )
+        if isinstance(detail, list):
+            for line in detail:
+                print(line)
+        else:
+            print(f"  {detail}")
+        return 0 if ok else 1
+
     rows = []
     for name, api_kind, base_url, key_env, model in PROBES:
         print(f"\n{name}  ({api_kind})")

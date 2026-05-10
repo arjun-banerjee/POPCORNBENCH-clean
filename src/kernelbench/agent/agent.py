@@ -123,6 +123,9 @@ class KernelAgent:
         reasoning_context_max_chars: Cap reasoning when compacting chat / storing.
         chat_context_tail_messages: If set, sliding window on chat history (tail size).
         llm_concurrency_semaphore: Optional semaphore acquired around each LLM HTTP call.
+        omit_responses_reasoning: If true, omit the ``reasoning`` parameter on
+            ``responses.create`` (for providers like xAI Grok that reject
+            OpenAI-style reasoning payloads).
     """
 
     def __init__(
@@ -151,6 +154,7 @@ class KernelAgent:
         llm_error_retries: int = 3,
         verbose: bool = False,
         api_kind: str = "openai",
+        omit_responses_reasoning: bool = False,
         save_path: str | None = None,
         eval_client: Any = None,
         initial_message: str | None = None,
@@ -176,6 +180,7 @@ class KernelAgent:
         self.llm_error_retries = max(1, int(llm_error_retries))
         self.verbose = verbose
         self.api_kind = api_kind
+        self.omit_responses_reasoning = omit_responses_reasoning
         self.save_path = save_path
         self.tool_output_context_max_chars = max(0, int(tool_output_context_max_chars))
         self.reasoning_context_max_chars = max(0, int(reasoning_context_max_chars))
@@ -496,13 +501,14 @@ class KernelAgent:
                 "input": input_items,
                 "tools": tool_schemas,
             }
-            if self.reasoning_effort is not None:
-                create_kwargs["reasoning"] = {
-                    "effort": self.reasoning_effort,
-                    "summary": "auto",
-                }
-            else:
-                create_kwargs["reasoning"] = {"summary": "auto"}
+            if not self.omit_responses_reasoning:
+                if self.reasoning_effort is not None:
+                    create_kwargs["reasoning"] = {
+                        "effort": self.reasoning_effort,
+                        "summary": "auto",
+                    }
+                else:
+                    create_kwargs["reasoning"] = {"summary": "auto"}
             if self.max_turns == 1:
                 create_kwargs["tool_choice"] = "required"
 
