@@ -1,6 +1,7 @@
 This directory vendors only the strictest handwritten baseline CUDA references for `popcorn` kernels.
 
 Inclusion rule:
+- the upstream `.cu` file must be copied exactly from the cited GitHub source, except for the added top-of-file PopcornBench mapping comment
 - the local kernel and upstream CUDA source must match at the execution-pattern level, not just the broad model family
 - if a reference was only a component-family or bundle match, it is intentionally excluded here
 
