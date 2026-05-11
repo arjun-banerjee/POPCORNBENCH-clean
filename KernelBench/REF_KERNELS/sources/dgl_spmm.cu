@@ -1,6 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/3_CSRSpMMMessagePassing.py
-// - level1/popcorn/18_CSRMultiHeadSpMM.py
+// Upstream source:
+// - https://github.com/dmlc/dgl/blob/master/src/array/cuda/spmm.cu
 /**
  *  Copyright (c) 2020 by Contributors
  * @file array/cuda/spmm.cu
@@ -40,6 +41,7 @@ void SpMMCsr(
   if (reduce == "sum") {
     bool more_nnz = (csr.indices->shape[0] > csr.num_rows * csr.num_cols);
     if (op == "copy_lhs" && cusparse_available<DType, IdType>(more_nnz)) {
+      // cusparse
       int64_t x_length = 1;
       for (int i = 1; i < ufeat->ndim; ++i) x_length *= ufeat->shape[i];
       CusparseCsrmm2<DType, IdType>(
@@ -48,6 +50,7 @@ void SpMMCsr(
     } else if (
         op == "mul" && is_scalar_efeat &&
         cusparse_available<DType, IdType>(more_nnz)) {
+      // cusparse
       int64_t x_length = 1;
       for (int i = 1; i < ufeat->ndim; ++i) x_length *= ufeat->shape[i];
       if (!IsNullArray(csr.data)) {
@@ -57,7 +60,7 @@ void SpMMCsr(
           ufeat->ctx, csr, static_cast<DType*>(ufeat->data),
           static_cast<DType*>(efeat->data), static_cast<DType*>(out->data),
           x_length, use_deterministic_alg_only);
-    } else {
+    } else {  // general kernel
       SWITCH_OP(op, Op, {
         cuda::SpMMCsr<IdType, DType, Op, cuda::reduce::Sum<IdType, DType> >(
             bcast, csr, ufeat, efeat, out, NullArray(), NullArray());
@@ -123,7 +126,7 @@ template void SpMMCsr<kDGLCUDA, int64_t, __nv_bfloat16>(
     const std::string& op, const std::string& reduce, const BcastOff& bcast,
     const CSRMatrix& csr, NDArray ufeat, NDArray efeat, NDArray out,
     std::vector<NDArray> out_aux);
-#endif
+#endif  // BF16_ENABLED
 template void SpMMCsr<kDGLCUDA, int32_t, float>(
     const std::string& op, const std::string& reduce, const BcastOff& bcast,
     const CSRMatrix& csr, NDArray ufeat, NDArray efeat, NDArray out,
@@ -158,7 +161,7 @@ template void SpMMCoo<kDGLCUDA, int64_t, __nv_bfloat16>(
     const std::string& op, const std::string& reduce, const BcastOff& bcast,
     const COOMatrix& coo, NDArray ufeat, NDArray efeat, NDArray out,
     std::vector<NDArray> out_aux);
-#endif
+#endif  // BF16_ENABLED
 template void SpMMCoo<kDGLCUDA, int32_t, float>(
     const std::string& op, const std::string& reduce, const BcastOff& bcast,
     const COOMatrix& coo, NDArray ufeat, NDArray efeat, NDArray out,

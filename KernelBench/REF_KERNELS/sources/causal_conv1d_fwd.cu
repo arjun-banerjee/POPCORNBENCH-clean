@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/5_Conv1d_Causal.py
+// Upstream source:
+// - https://github.com/Dao-AILab/causal-conv1d/blob/main/csrc/causal_conv1d_fwd.cu
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/

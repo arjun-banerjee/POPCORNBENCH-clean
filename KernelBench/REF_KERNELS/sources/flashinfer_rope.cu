@@ -1,6 +1,8 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/20_RotaryPositionEmbeddingBio.py
 // - level2/popcorn/26_RoPEKVCacheUpdate.py
+// Upstream source:
+// - https://github.com/flashinfer-ai/flashinfer/blob/main/csrc/rope.cu
 /*
  * Copyright (c) 2024 by FlashInfer team.
  *

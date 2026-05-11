@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level2/popcorn/30_SelectiveScan_Mamba.py
+// Upstream source:
+// - https://github.com/state-spaces/mamba/blob/main/csrc/selective_scan/selective_scan_fwd_fp32.cu
 /******************************************************************************
  * Copyright (c) 2023, Tri Dao.
  ******************************************************************************/

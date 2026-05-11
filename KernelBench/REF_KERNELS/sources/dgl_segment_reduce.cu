@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/17_CSRMaxAggregation.py
+// Upstream source:
+// - https://github.com/dmlc/dgl/blob/master/src/array/cuda/segment_reduce.cu
 /**
  *  Copyright (c) 2020 by Contributors
  * @file array/cuda/segment_reduce.cu
@@ -68,7 +70,7 @@ template void SegmentReduce<kDGLCUDA, int32_t, __nv_bfloat16>(
 template void SegmentReduce<kDGLCUDA, int64_t, __nv_bfloat16>(
     const std::string& op, NDArray feat, NDArray offsets, NDArray out,
     NDArray arg);
-#endif
+#endif  // BF16_ENABLED
 template void SegmentReduce<kDGLCUDA, int32_t, float>(
     const std::string& op, NDArray feat, NDArray offsets, NDArray out,
     NDArray arg);
@@ -91,7 +93,7 @@ template void ScatterAdd<kDGLCUDA, int32_t, __nv_bfloat16>(
     NDArray feat, NDArray idx, NDArray out);
 template void ScatterAdd<kDGLCUDA, int64_t, __nv_bfloat16>(
     NDArray feat, NDArray idx, NDArray out);
-#endif
+#endif  // BF16_ENABLED
 template void ScatterAdd<kDGLCUDA, int32_t, float>(
     NDArray feat, NDArray idx, NDArray out);
 template void ScatterAdd<kDGLCUDA, int64_t, float>(
@@ -118,7 +120,7 @@ template void UpdateGradMinMax_hetero<kDGLCUDA, int64_t, __nv_bfloat16>(
     const HeteroGraphPtr& g, const std::string& op,
     const std::vector<NDArray>& feat, const std::vector<NDArray>& idx,
     const std::vector<NDArray>& idx_etype, std::vector<NDArray>* out);
-#endif
+#endif  // BF16_ENABLED
 template void UpdateGradMinMax_hetero<kDGLCUDA, int32_t, float>(
     const HeteroGraphPtr& g, const std::string& op,
     const std::vector<NDArray>& feat, const std::vector<NDArray>& idx,
@@ -145,7 +147,7 @@ template void BackwardSegmentCmp<kDGLCUDA, int32_t, __nv_bfloat16>(
     NDArray feat, NDArray arg, NDArray out);
 template void BackwardSegmentCmp<kDGLCUDA, int64_t, __nv_bfloat16>(
     NDArray feat, NDArray arg, NDArray out);
-#endif
+#endif  // BF16_ENABLED
 template void BackwardSegmentCmp<kDGLCUDA, int32_t, float>(
     NDArray feat, NDArray arg, NDArray out);
 template void BackwardSegmentCmp<kDGLCUDA, int64_t, float>(

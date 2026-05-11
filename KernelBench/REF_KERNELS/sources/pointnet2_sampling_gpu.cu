@@ -1,10 +1,14 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/13_FarthestPointSampling3D.py
+// Upstream source:
+// - https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/pointnet2_ops_lib/pointnet2_ops/_ext-src/src/sampling_gpu.cu
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "cuda_utils.h"
 
+// input: points(b, c, n) idx(b, m)
+// output: out(b, c, m)
 __global__ void gather_points_kernel(int b, int c, int n, int m,
                                      const float *__restrict__ points,
                                      const int *__restrict__ idx,
@@ -29,6 +33,8 @@ void gather_points_kernel_wrapper(int b, int c, int n, int npoints,
   CUDA_CHECK_ERRORS();
 }
 
+// input: grad_out(b, c, m) idx(b, m)
+// output: grad_points(b, c, n)
 __global__ void gather_points_grad_kernel(int b, int c, int n, int m,
                                           const float *__restrict__ grad_out,
                                           const int *__restrict__ idx,
@@ -62,6 +68,8 @@ __device__ void __update(float *__restrict__ dists, int *__restrict__ dists_i,
   dists_i[idx1] = v2 > v1 ? i2 : i1;
 }
 
+// Input dataset: (b, n, 3), tmp: (b, n)
+// Ouput idxs (b, m)
 template <unsigned int block_size>
 __global__ void furthest_point_sampling_kernel(
     int b, int n, int m, const float *__restrict__ dataset,
@@ -89,9 +97,10 @@ __global__ void furthest_point_sampling_kernel(
     float y1 = dataset[old * 3 + 1];
     float z1 = dataset[old * 3 + 2];
     for (int k = tid; k < n; k += stride) {
-      float x2 = dataset[k * 3 + 0];
-      float y2 = dataset[k * 3 + 1];
-      float z2 = dataset[k * 3 + 2];
+      float x2, y2, z2;
+      x2 = dataset[k * 3 + 0];
+      y2 = dataset[k * 3 + 1];
+      z2 = dataset[k * 3 + 2];
       float mag = (x2 * x2) + (y2 * y2) + (z2 * z2);
       if (mag <= 1e-3) continue;
 
@@ -108,39 +117,57 @@ __global__ void furthest_point_sampling_kernel(
     __syncthreads();
 
     if (block_size >= 512) {
-      if (tid < 256) __update(dists, dists_i, tid, tid + 256);
+      if (tid < 256) {
+        __update(dists, dists_i, tid, tid + 256);
+      }
       __syncthreads();
     }
     if (block_size >= 256) {
-      if (tid < 128) __update(dists, dists_i, tid, tid + 128);
+      if (tid < 128) {
+        __update(dists, dists_i, tid, tid + 128);
+      }
       __syncthreads();
     }
     if (block_size >= 128) {
-      if (tid < 64) __update(dists, dists_i, tid, tid + 64);
+      if (tid < 64) {
+        __update(dists, dists_i, tid, tid + 64);
+      }
       __syncthreads();
     }
     if (block_size >= 64) {
-      if (tid < 32) __update(dists, dists_i, tid, tid + 32);
+      if (tid < 32) {
+        __update(dists, dists_i, tid, tid + 32);
+      }
       __syncthreads();
     }
     if (block_size >= 32) {
-      if (tid < 16) __update(dists, dists_i, tid, tid + 16);
+      if (tid < 16) {
+        __update(dists, dists_i, tid, tid + 16);
+      }
       __syncthreads();
     }
     if (block_size >= 16) {
-      if (tid < 8) __update(dists, dists_i, tid, tid + 8);
+      if (tid < 8) {
+        __update(dists, dists_i, tid, tid + 8);
+      }
       __syncthreads();
     }
     if (block_size >= 8) {
-      if (tid < 4) __update(dists, dists_i, tid, tid + 4);
+      if (tid < 4) {
+        __update(dists, dists_i, tid, tid + 4);
+      }
       __syncthreads();
     }
     if (block_size >= 4) {
-      if (tid < 2) __update(dists, dists_i, tid, tid + 2);
+      if (tid < 2) {
+        __update(dists, dists_i, tid, tid + 2);
+      }
       __syncthreads();
     }
     if (block_size >= 2) {
-      if (tid < 1) __update(dists, dists_i, tid, tid + 1);
+      if (tid < 1) {
+        __update(dists, dists_i, tid, tid + 1);
+      }
       __syncthreads();
     }
 
