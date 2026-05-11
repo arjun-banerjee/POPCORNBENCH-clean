@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/13_FarthestPointSampling3D.py
+// Upstream source:
+// - https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/pointnet2_ops_lib/pointnet2_ops/_ext-src/src/sampling_gpu.cu
 #include <stdio.h>
 #include <stdlib.h>
 

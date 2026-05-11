@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/3_CSRSpMMMessagePassing.py
+// Upstream source:
+// - https://github.com/dmlc/dgl/blob/master/src/array/cuda/spmm.cu
 /**
  *  Copyright (c) 2020 by Contributors
  * @file array/cuda/spmm.cu

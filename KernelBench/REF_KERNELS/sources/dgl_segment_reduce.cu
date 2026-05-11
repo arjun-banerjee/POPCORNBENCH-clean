@@ -1,5 +1,7 @@
 // PopcornBench reference mapping:
 // - level1/popcorn/17_CSRMaxAggregation.py
+// Upstream source:
+// - https://github.com/dmlc/dgl/blob/master/src/array/cuda/segment_reduce.cu
 /**
  *  Copyright (c) 2020 by Contributors
  * @file array/cuda/segment_reduce.cu
