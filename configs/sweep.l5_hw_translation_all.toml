@@ -10,7 +10,7 @@
 # See sweep.l5_hw_translation_single_turn.toml header for agent/parallelism knobs.
 
 [run]
-name                    = "l5_hw_translation_all_full_20260511_gpt"
+name                    = "l5_hw_translation_all_final_gpt"
 dataset_src             = "local"
 variants                = ["hardware_translation_stub"]
 levels                  = [5]
@@ -73,6 +73,17 @@ rpm                     = 250
 tpm                     = 250000
 reasoning_effort        = "medium"
 
+# GLM-5 on Azure OpenAI v1 (Foundry partner) — set POPCORN_AZURE_KEY.
+[[models]]
+name                    = "FW-GLM-5-1"
+api_kind                = "openai_chat"
+base_url                = "https://popcorn-foundry-resource.openai.azure.com/openai/v1/"
+api_key_env             = "POPCORN_AZURE_KEY"
+rpm                     = 250
+tpm                     = 250000
+# Foundry GLM rejects unknown chat body keys (e.g. popcornbench_run_meta).
+omit_chat_run_meta      = true
+
 [[models]]
 name                    = "Llama-4-Maverick-17B-128E-Instruct-FP8"
 api_kind                = "openai_chat"
@@ -81,10 +92,21 @@ api_key_env             = "THAVA_AZURE_KEY"
 rpm                     = 250
 tpm                     = 250000
 
+#[[models]]
+#name                    = "Kimi-K2.6"
+#api_kind                = "openai_chat"
+#base_url                = "https://thava-openai.services.ai.azure.com/models"
+#api_key_env             = "THAVA_AZURE_KEY"
+#rpm                     = 250
+#tpm                     = 250000
+
+# xAI Grok — set XAI_API_KEY (see configs/sweep.grok.toml).
 [[models]]
-name                    = "Kimi-K2.6"
+name                    = "grok-4.3"
 api_kind                = "openai_chat"
-base_url                = "https://thava-openai.services.ai.azure.com/models"
-api_key_env             = "THAVA_AZURE_KEY"
-rpm                     = 250
-tpm                     = 250000
+base_url                = "https://api.x.ai/v1"
+api_key_env             = "XAI_API_KEY"
+deployment_name         = "grok-4.3"
+request_timeout_s       = 3600
+rpm                     = 60
+tpm                     = 200000

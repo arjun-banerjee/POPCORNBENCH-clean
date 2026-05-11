@@ -457,6 +457,7 @@ def run_one(
                 omit_responses_reasoning=bool(
                     model_cfg.get("omit_responses_reasoning", False)
                 ),
+                omit_chat_run_meta=bool(model_cfg.get("omit_chat_run_meta", False)),
             )
 
             # Lock fallback: when the eval queue is NOT in use (e.g. legacy

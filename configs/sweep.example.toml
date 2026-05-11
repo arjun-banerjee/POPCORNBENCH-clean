@@ -71,6 +71,8 @@ base_url           = "https://popcorn-foundry-resource.openai.azure.com/openai/v
 api_key_env        = "POPCORN_AZURE_KEY"
 rpm                = 250
 tpm                = 250000
+# Strict Foundry chat: omit extra_body.popcornbench_run_meta (see omit_chat_run_meta in SWEEP.md).
+omit_chat_run_meta = true
 
 [[models]]
 name               = "Llama-4-Maverick-17B-128E-Instruct-FP8"

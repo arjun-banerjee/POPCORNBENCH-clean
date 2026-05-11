@@ -163,6 +163,9 @@ class KernelAgent:
         omit_responses_reasoning: If true, omit the ``reasoning`` parameter on
             ``responses.create`` (for providers like xAI Grok that reject
             OpenAI-style reasoning payloads).
+        omit_chat_run_meta: If true, omit ``popcornbench_run_meta`` from
+            ``chat.completions.create`` extra body (strict Azure chat gateways
+            may reject unknown JSON keys).
     """
 
     def __init__(
@@ -192,6 +195,7 @@ class KernelAgent:
         verbose: bool = False,
         api_kind: str = "openai",
         omit_responses_reasoning: bool = False,
+        omit_chat_run_meta: bool = False,
         save_path: str | None = None,
         eval_client: Any = None,
         initial_message: str | None = None,
@@ -218,6 +222,7 @@ class KernelAgent:
         self.verbose = verbose
         self.api_kind = api_kind
         self.omit_responses_reasoning = omit_responses_reasoning
+        self.omit_chat_run_meta = omit_chat_run_meta
         self.save_path = save_path
         self.tool_output_context_max_chars = max(0, int(tool_output_context_max_chars))
         self.reasoning_context_max_chars = max(0, int(reasoning_context_max_chars))
@@ -1162,7 +1167,7 @@ class KernelAgent:
                 "tools": tool_schemas,
                 "tool_choice": "required" if self.max_turns == 1 else "auto",
             }
-            if self.save_path:
+            if self.save_path and not self.omit_chat_run_meta:
                 create_kwargs["extra_body"] = {
                     "popcornbench_run_meta": {
                         "run_name": self.run_name,

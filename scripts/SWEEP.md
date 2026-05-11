@@ -492,6 +492,7 @@ you want to run.
 | `deployment_name`  | string | falls back to `name`                                         | If your Azure deployment name differs from the display name, put the deployment name here. |
 | `reasoning_effort` | string | inherits `[agent].reasoning_effort`                          | Per-model override. Only meaningful for `api_kind = "openai"`. |
 | `omit_responses_reasoning` | bool | `false` | If `true`, omit the `reasoning` field on `responses.create`. Occasionally useful for strict Responses gateways; **not used for Grok** (use `openai_chat` instead). |
+| `omit_chat_run_meta` | bool | `false` | If `true`, omit `popcornbench_run_meta` from Chat Completions `extra_body`. Use for strict Azure Foundry chat gateways that reject unknown request keys (e.g. **FW-GLM-5-1**). |
 | `request_timeout_s` | float | SDK default | HTTP timeout (seconds) for the OpenAI client. Use a large value (e.g. `3600`) for slow Grok / reasoning models. |
 | `rpm`              | int    | `250`                                                        | Requests-per-minute budget for this model. Currently informational; concurrency is capped via `tpm` (see below). |
 | `tpm`              | int    | `250000`                                                     | Tokens-per-minute budget. Default per-model concurrency is `tpm / 25_000` (≈10k tokens/turn × 2.5× safety). |

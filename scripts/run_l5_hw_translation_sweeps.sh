@@ -3,6 +3,9 @@
 #
 # Order matches scripts/run_demo_sweeps.sh: baseline first, then richer tool sets.
 #
+# Models are listed in each configs/sweep.l5_hw_translation*.toml; include GPT-5.5 (popcorn-centralus),
+# FW-GLM-5-1 (POPCORN_AZURE_KEY), Llama-Maverick / optional Kimi (THAVA_AZURE_KEY), Grok (XAI_API_KEY).
+#
 #   ./scripts/run_l5_hw_translation_sweeps.sh
 #   ./scripts/run_l5_hw_translation_sweeps.sh 2>&1 | tee l5_hw_translation_sweeps.log
 
