@@ -18,7 +18,7 @@
 [run]
 name              = "l34_all"
 dataset_src       = "local"
-variants          = ["original", "popcorn"]
+variants          = ["popcorn"]
 levels            = [3, 4]
 problem_subset    = []
 backend           = "cuda"
