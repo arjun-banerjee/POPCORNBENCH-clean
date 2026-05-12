@@ -50,6 +50,12 @@
       "a100_legacy": "44_multi_gemm_ir_and_codegen",
       "h100_legacy": "77_blackwell_fmha",
       "paired_source_problem_id": 29
+    },
+    {
+      "problem_id": 31,
+      "stem": "sparse_tensorop_gemm",
+      "a100_legacy": "15_ampere_sparse_tensorop_gemm",
+      "h100_legacy": "62_hopper_sparse_gemm"
     }
   ]
 }

@@ -40,7 +40,7 @@ class gen_build_sys:
         code += '''\
 # Auto Generated code - Do not edit.
 
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.18)
 project(CUTLASS_MULTI_GEMMS LANGUAGES CXX CUDA)
 find_package(CUDAToolkit)
 set(CUDA_PATH ${{CUDA_TOOLKIT_ROOT_DIR}})
@@ -74,13 +74,13 @@ set(CMAKE_C_FLAGS_DEBUG    \"${CMAKE_C_FLAGS_DEBUG}    -Wall -O0\")
 set(CMAKE_CXX_FLAGS_DEBUG  \"${CMAKE_CXX_FLAGS_DEBUG}  -Wall -O0\")
 set(CMAKE_CUDA_FLAGS_DEBUG \"${CMAKE_CUDA_FLAGS_DEBUG} -O0 -G -Xcompiler -Wall\")
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-if(CMAKE_CXX_STANDARD STREQUAL \"11\")
-  set(CMAKE_CUDA_FLAGS \"${CMAKE_CUDA_FLAGS} --expt-extended-lambda\")
-  set(CMAKE_CUDA_FLAGS \"${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr\")
-endif()
+set(CMAKE_CUDA_FLAGS \"${CMAKE_CUDA_FLAGS} --expt-extended-lambda\")
+set(CMAKE_CUDA_FLAGS \"${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr\")
 
 set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} -g -O3\")
 set(CMAKE_CUDA_FLAGS \"${CMAKE_CUDA_FLAGS} -Xcompiler -O3\")
@@ -115,7 +115,6 @@ add_executable(sample
 )
 target_link_libraries(sample PRIVATE
   -lcudart
-  -lnvToolsExt
   ${CMAKE_THREAD_LIBS_INIT}
 )
 
