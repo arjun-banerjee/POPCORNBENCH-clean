@@ -1060,3 +1060,42 @@ def parse_nsight_metrics(
         summary.bottleneck = "unknown"
 
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Multi-rank parser (torchrun + ncu --target-processes all)
+# ---------------------------------------------------------------------------
+
+def parse_multi_rank_nsight(
+    per_rank_raw: Dict[Any, Dict[str, Optional[float]]],
+    device_name: str,
+    kernel_breakdown: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[int, ProfileSummary]:
+    """Convert a ``{rank_id -> raw_metrics}`` dict into per-rank summaries.
+
+    Each rank is parsed independently via :func:`parse_nsight_metrics`; the
+    optional ``kernel_breakdown`` (only collected from rank 0 in the torchrun
+    worker) is attached to rank 0 if present and not duplicated to other
+    ranks.
+
+    The keys of ``per_rank_raw`` may be ``int`` or ``str`` (the JSON
+    round-trip in ``_profile_worker_torchrun.py`` stringifies them). The
+    returned dict is always keyed by ``int`` rank id, sorted.
+
+    No aggregation is performed — callers should render each rank's
+    ``format_for_llm()`` separately so the LLM can see real per-rank
+    differences (load imbalance, divergent stall patterns, etc.).
+    """
+    out: Dict[int, ProfileSummary] = {}
+    for raw_key, raw_metrics in per_rank_raw.items():
+        try:
+            rank_id = int(raw_key)
+        except (TypeError, ValueError):
+            continue
+        breakdown_for_rank = kernel_breakdown if rank_id == 0 else None
+        out[rank_id] = parse_nsight_metrics(
+            raw_metrics=raw_metrics,
+            device_name=device_name,
+            kernel_breakdown=breakdown_for_rank,
+        )
+    return dict(sorted(out.items()))

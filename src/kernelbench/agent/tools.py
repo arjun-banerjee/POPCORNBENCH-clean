@@ -51,6 +51,24 @@ from typing import Any, Callable
 
 import torch
 
+from kernelbench.distributed_torchrun_eval import (
+    eval_kernel_via_torchrun,
+    reference_uses_torchrun_collectives,
+)
+from kernelbench.eval import (
+    KernelExecResult,
+    eval_kernel_against_ref,
+    load_custom_model,
+    load_custom_model_with_tempfile,
+    graceful_eval_cleanup,
+    get_torch_dtype_from_string,
+)
+from kernelbench.kernel_static_checker import validate_kernel_static
+from kernelbench.reference_timing import (
+    compute_dynamic_timeout,
+    probe_reference_runtime,
+)
+
 
 # When eval_kernel_against_ref returns None (e.g. torch JIT extension lock-file
 # contention from oversubscribed agents on the same GPU), retry transparently
@@ -153,15 +171,92 @@ def _run_with_oom_retry(fn: Callable[[], Any], *, max_retries: int = 2) -> Any:
     assert last_exc is not None
     raise last_exc
 
-from kernelbench.eval import (
-    KernelExecResult,
-    eval_kernel_against_ref,
-    load_custom_model,
-    load_custom_model_with_tempfile,
-    graceful_eval_cleanup,
-    get_torch_dtype_from_string,
-)
-from kernelbench.kernel_static_checker import validate_kernel_static
+
+# ---------------------------------------------------------------------------
+# Dynamic eval-timeout resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_dynamic_eval_timeouts(ctx) -> tuple[int, int]:
+    """Return ``(dyn_correctness_s, dyn_submit_s)`` for the current context.
+
+    - When ``ctx.dynamic_eval_timeout`` is False, both equal
+      ``ctx.eval_torchrun_timeout_s`` (the configured static ceiling).
+    - Otherwise, probe the reference runtime once per
+      (level, problem_id, world_size) and apply the documented formulas.
+      Probe failure falls back to ``ctx.eval_torchrun_timeout_s``.
+
+    Side effects:
+    - Caches ``t_ref`` on ``ctx._ref_runtime_cache`` keyed by
+      (level, problem_id, world_size).
+    - Logs the probe result and resolved timeouts the first time we resolve
+      a given (level, problem_id, world_size).
+    """
+    ceiling = int(ctx.eval_torchrun_timeout_s or 3600)
+    if not getattr(ctx, "dynamic_eval_timeout", False):
+        return ceiling, ceiling
+
+    ws = max(1, int(getattr(ctx, "distributed_torchrun_world_size", 1) or 1))
+    level = int(getattr(ctx, "level", 0))
+    pid = int(getattr(ctx, "problem_id", 0))
+    cache = ctx._ref_runtime_cache if ctx._ref_runtime_cache is not None else {}
+    logged = ctx._probe_logged if ctx._probe_logged is not None else {}
+    key = (level, pid, ws)
+
+    if key in cache:
+        t_ref = cache[key]
+    else:
+        # Probe with a small trial count — we only need an order-of-magnitude
+        # estimate. Reuses correctness's trial count cap so the probe wall
+        # time is comparable to a single correctness pass.
+        probe_trials = max(1, min(int(ctx.num_correct_trials or 5), 5))
+        t_ref = probe_reference_runtime(
+            ref_arch_src=ctx.ref_arch_src,
+            world_size=ws,
+            num_trials=probe_trials,
+            backend=ctx.backend,
+            precision_str=ctx.precision,
+            device=getattr(ctx, "device", None),
+            probe_timeout_s=int(getattr(ctx, "reference_probe_timeout_s", 300) or 300),
+            build_dir=getattr(ctx, "build_dir", None),
+            verbose=bool(getattr(ctx, "verbose", False)),
+        )
+        cache[key] = t_ref  # may be None on failure; cached so we don't retry
+
+    dyn_correctness = compute_dynamic_timeout(
+        t_ref_s=t_ref,
+        overhead_s=float(getattr(ctx, "correctness_overhead_s", 120) or 0),
+        k=float(getattr(ctx, "correctness_timeout_k", 10.0) or 0),
+        n_trials=int(ctx.num_correct_trials or 0),
+        floor_s=float(getattr(ctx, "correctness_floor_s", 120) or 0),
+        ceiling_s=ceiling,
+    )
+    dyn_submit = compute_dynamic_timeout(
+        t_ref_s=t_ref,
+        overhead_s=float(getattr(ctx, "submit_overhead_s", 180) or 0),
+        k=float(getattr(ctx, "submit_timeout_k", 10.0) or 0),
+        n_trials=int((ctx.num_correct_trials or 0) + (ctx.num_perf_trials or 0)),
+        floor_s=float(getattr(ctx, "submit_floor_s", 300) or 0),
+        ceiling_s=ceiling,
+    )
+
+    if not logged.get(key):
+        logged[key] = True
+        if t_ref is None:
+            print(
+                f"[L{level}/P{pid}] reference probe FAILED (world={ws}); "
+                f"using ceiling {ceiling}s for run_correctness + submit_kernel",
+                flush=True,
+            )
+        else:
+            print(
+                f"[L{level}/P{pid}] reference probe: t_ref={t_ref:.3f}s "
+                f"(world={ws}) -> dyn_correctness={dyn_correctness}s, "
+                f"dyn_submit={dyn_submit}s (cap {ceiling}s)",
+                flush=True,
+            )
+
+    return dyn_correctness, dyn_submit
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +282,47 @@ class ToolContext:
     # serialization from agent worker oversubscription. See eval_client.py.
     eval_client: Any = None
 
+    # When >1 and ``ref_arch_src`` imports ``kernelbench.distributed_collectives``,
+    # submit_kernel runs eval via ``torchrun`` with all GPUs (CUDA_VISIBLE_DEVICES
+    # cleared for the subprocess). Default 8 for L5 multi-GPU comm benchmarks.
+    distributed_torchrun_world_size: int = 1
+    eval_torchrun_timeout_s: int = 3600
+
+    # --- Dynamic eval-timeout knobs (see kernelbench.reference_timing). -----
+    # When ``dynamic_eval_timeout`` is True, RunCorrectnessTool / SubmitKernelTool
+    # probe the reference forward time once per (level, problem_id, world_size)
+    # via ``probe_reference_runtime`` and derive per-tool caps from the
+    # formulas below; ``eval_torchrun_timeout_s`` stays the hard ceiling.
+    dynamic_eval_timeout: bool = False
+    correctness_overhead_s: int = 120
+    correctness_timeout_k: float = 10.0
+    correctness_floor_s: int = 120
+    submit_overhead_s: int = 180
+    submit_timeout_k: float = 10.0
+    submit_floor_s: int = 300
+    reference_probe_timeout_s: int = 300
+    # Identity used for the probe cache key (set by run_sweep.py / KernelAgent).
+    level: int = 0
+    problem_id: int = 0
+    # Shared mutable handle for the per-worker probe cache. Initialized to
+    # an empty dict in __post_init__ unless caller injects their own; tools
+    # populate it lazily on first call. Keyed by (level, problem_id, world_size).
+    _ref_runtime_cache: dict | None = None
+    # Per-(level, problem_id, world_size) "we already logged the probe" flag.
+    _probe_logged: dict | None = None
+
     # Mutable: last profile result for delta comparison across iterations
     _last_profile_summary: Any = field(default=None, init=False, repr=False)
+    # Multi-rank torchrun profile state: rank_id -> ProfileSummary. Updated
+    # only by ProfileKernelTool when ctx.distributed_torchrun_world_size > 1.
+    _last_per_rank_profile_summary: Any = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Ensure shared mutable holders exist so callers can rely on them.
+        if self._ref_runtime_cache is None:
+            self._ref_runtime_cache = {}
+        if self._probe_logged is None:
+            self._probe_logged = {}
 
     @property
     def torch_precision(self) -> torch.dtype:
@@ -359,27 +493,59 @@ class RunCorrectnessTool(Tool):
     input_schema = _KERNEL_CODE_SCHEMA
 
     def execute(self, ctx: ToolContext, kernel_code: str, **_) -> ToolResult:
+        # Resolve dynamic timeouts (may probe the reference forward once).
+        dyn_correctness_s, _dyn_submit_s = _resolve_dynamic_eval_timeouts(ctx)
+
         # Route through the per-GPU eval server when available so only one
         # run_correctness allocates GPU memory at a time.
         if ctx.eval_client is not None:
-            return ctx.eval_client.run_correctness(ctx, kernel_code)
+            return ctx.eval_client.run_correctness(
+                ctx, kernel_code, timeout_s=dyn_correctness_s
+            )
 
         build_dir = _per_kernel_build_dir(ctx.build_dir, kernel_code)
-        try:
-            result: KernelExecResult | None = _run_with_oom_retry(
-                lambda: _retry_eval_on_lock(lambda: eval_kernel_against_ref(
+
+        def _run_correct_once() -> KernelExecResult | None:
+            ws = max(1, int(ctx.distributed_torchrun_world_size or 1))
+            if ws > 1:
+                tr = eval_kernel_via_torchrun(
+                    world_size=ws,
                     original_model_src=ctx.ref_arch_src,
                     custom_model_src=kernel_code,
+                    seed_num=42,
                     num_correct_trials=ctx.num_correct_trials,
                     num_perf_trials=0,
                     measure_performance=False,
+                    timing_method=ctx.timing_method,
                     verbose=ctx.verbose,
                     build_dir=build_dir,
-                    device=ctx.device,
                     backend=ctx.backend,
-                    precision=ctx.torch_precision,
+                    precision_str=ctx.precision,
                     check_for_excessive_speedup=False,
-                ), build_dir=build_dir)
+                    timeout_s=int(dyn_correctness_s),
+                )
+                if tr is not None:
+                    return tr
+                # Fall through to single-GPU eval.
+            return eval_kernel_against_ref(
+                original_model_src=ctx.ref_arch_src,
+                custom_model_src=kernel_code,
+                num_correct_trials=ctx.num_correct_trials,
+                num_perf_trials=0,
+                measure_performance=False,
+                verbose=ctx.verbose,
+                build_dir=build_dir,
+                device=ctx.device,
+                backend=ctx.backend,
+                precision=ctx.torch_precision,
+                check_for_excessive_speedup=False,
+            )
+
+        try:
+            result: KernelExecResult | None = _run_with_oom_retry(
+                lambda: _retry_eval_on_lock(
+                    _run_correct_once, build_dir=build_dir
+                )
             )
         except BaseException as exc:
             if _is_cuda_oom(exc):
@@ -472,7 +638,14 @@ class ProfileKernelTool(Tool):
         "pipe utilization, branch divergence, eligible-warps analysis, and "
         "targeted data-driven optimization hints. Supports delta comparison "
         "across iterations. Use when you have a correct kernel and need to "
-        "understand why it is slow."
+        "understand why it is slow.\n"
+        "Multi-rank mode: when world_size>1 (8xH100 sweeps), profiling runs "
+        "ncu --target-processes all around a torchrun --nproc_per_node=N "
+        "launch and reports a full ProfileSummary for EACH rank — load "
+        "imbalance, divergent stalls, and per-rank occupancy are all "
+        "visible. Delta vs previous iteration is computed per rank. "
+        "Profiling is fail-hard: any missing rank report or any rank with "
+        "zero captured metrics aborts the call."
     )
     input_schema = _KERNEL_CODE_SCHEMA
 
@@ -481,6 +654,13 @@ class ProfileKernelTool(Tool):
             os.path.abspath(__file__))))),
         "scripts", "_profile_worker.py",
     )
+    _WORKER_SCRIPT_TORCHRUN = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))),
+        "scripts", "_profile_worker_torchrun.py",
+    )
+
+    _MULTI_RANK_TIMEOUT_S = 1800
 
     # Per-tool-instance cache: kernel_src_hash -> ToolResult. Keyed by the
     # exact kernel source the agent passes in, so repeated profile_kernel
@@ -499,7 +679,12 @@ class ProfileKernelTool(Tool):
         import sys
         import tempfile
 
-        cache_key = hashlib.sha1(kernel_code.encode("utf-8")).hexdigest()
+        world_size = max(1, int(getattr(ctx, "distributed_torchrun_world_size", 1) or 1))
+        # Include world_size so a single-rank profile and an 8-rank profile
+        # of identical code don't collide.
+        cache_key = (
+            hashlib.sha1(kernel_code.encode("utf-8")).hexdigest() + f":ws{world_size}"
+        )
         if cache_key in self._profile_cache:
             cached = self._profile_cache[cache_key]
             return ToolResult(
@@ -512,6 +697,7 @@ class ProfileKernelTool(Tool):
         from kernelbench.profile import NSIGHT_AVAILABLE, check_ncu_available
         from kernelbench.agent.nsight_parser import (
             ROOFLINE_METRICS,
+            parse_multi_rank_nsight,
             parse_nsight_metrics,
         )
 
@@ -528,6 +714,16 @@ class ProfileKernelTool(Tool):
                 success=False,
                 output="profile_kernel FAILED: ncu not found in PATH.",
                 metadata={"available": False},
+            )
+
+        if world_size > 1:
+            return self._execute_multi_rank(
+                ctx=ctx,
+                kernel_code=kernel_code,
+                world_size=world_size,
+                cache_key=cache_key,
+                parse_multi_rank_nsight=parse_multi_rank_nsight,
+                ROOFLINE_METRICS=ROOFLINE_METRICS,
             )
 
         request = {
@@ -596,7 +792,6 @@ class ProfileKernelTool(Tool):
                 metadata={"error": str(e)},
             )
 
-        # Separate kernel breakdown from ncu metric values
         kernel_breakdown = raw_output.pop("_kernel_breakdown", [])
         raw_metrics = raw_output
 
@@ -606,7 +801,6 @@ class ProfileKernelTool(Tool):
             raw_metrics, device_name, kernel_breakdown=kernel_breakdown
         )
 
-        # Store for delta comparison on next invocation
         ctx._last_profile_summary = summary
 
         result = ToolResult(
@@ -630,6 +824,208 @@ class ProfileKernelTool(Tool):
                     if summary.warp_stalls
                     else None
                 ),
+            },
+        )
+        self._profile_cache[cache_key] = result
+        return result
+
+    def _execute_multi_rank(
+        self,
+        *,
+        ctx: "ToolContext",
+        kernel_code: str,
+        world_size: int,
+        cache_key: str,
+        parse_multi_rank_nsight,
+        ROOFLINE_METRICS,
+    ) -> "ToolResult":
+        """Drive scripts/_profile_worker_torchrun.py and render per-rank summaries.
+
+        Fail-hard semantics: the worker already aborts if any rank is missing
+        a report or produced zero metrics. Anything we see here that isn't a
+        clean ``{"per_rank": {...}}`` payload is surfaced as PROFILE FAILED.
+        """
+        import json
+        import subprocess
+        import sys
+        import tempfile
+
+        request = {
+            "custom_model_src": kernel_code,
+            "ref_model_src": ctx.ref_arch_src,
+            "metrics": ROOFLINE_METRICS,
+            "num_trials": 1,
+            "seed": 42,
+            "world_size": world_size,
+            "backend": ctx.backend,
+            "precision": ctx.precision,
+            "build_dir": _per_kernel_build_dir(ctx.build_dir, kernel_code),
+            "verbose": ctx.verbose,
+            "timeout_s": self._MULTI_RANK_TIMEOUT_S,
+        }
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tmp:
+                json.dump(request, tmp)
+                req_path = tmp.name
+
+            proc = subprocess.run(
+                [sys.executable, self._WORKER_SCRIPT_TORCHRUN, req_path],
+                capture_output=True,
+                text=True,
+                timeout=self._MULTI_RANK_TIMEOUT_S + 60,
+            )
+            os.unlink(req_path)
+
+            if proc.returncode != 0:
+                stderr_tail = (proc.stderr or "").strip()[-800:]
+                stdout_tail = (proc.stdout or "").strip()[-800:]
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output=(
+                        f"profile_kernel FAILED (multi-rank, world_size="
+                        f"{world_size}): torchrun worker exited with code "
+                        f"{proc.returncode}.\nstdout tail: {stdout_tail}\n"
+                        f"stderr tail: {stderr_tail}"
+                    ),
+                    metadata={
+                        "error": stderr_tail or stdout_tail,
+                        "world_size": world_size,
+                    },
+                )
+
+            try:
+                raw_output = json.loads(proc.stdout.strip().splitlines()[-1])
+            except (ValueError, IndexError) as e:
+                stdout_tail = (proc.stdout or "")[-800:]
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output=(
+                        f"profile_kernel FAILED (multi-rank): could not parse "
+                        f"worker JSON: {e}.\nstdout tail: {stdout_tail}"
+                    ),
+                    metadata={"error": str(e), "world_size": world_size},
+                )
+
+            if "error" in raw_output:
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output=(
+                        f"profile_kernel FAILED (multi-rank, world_size="
+                        f"{world_size}): {raw_output['error']}"
+                    ),
+                    metadata={
+                        "error": raw_output["error"],
+                        "world_size": world_size,
+                    },
+                )
+
+        except subprocess.TimeoutExpired:
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                output=(
+                    f"profile_kernel FAILED (multi-rank): timed out after "
+                    f"{self._MULTI_RANK_TIMEOUT_S}s."
+                ),
+                metadata={"error": "timeout", "world_size": world_size},
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                output=(
+                    f"profile_kernel FAILED (multi-rank): "
+                    f"{type(e).__name__}: {e}"
+                ),
+                metadata={"error": str(e), "world_size": world_size},
+            )
+
+        per_rank_raw = raw_output.get("per_rank") or {}
+        if not per_rank_raw:
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                output=(
+                    "profile_kernel FAILED (multi-rank): worker returned no "
+                    "per_rank metrics."
+                ),
+                metadata={"error": "empty per_rank", "world_size": world_size},
+            )
+
+        kernel_breakdown = raw_output.get("_kernel_breakdown") or []
+        device_name = torch.cuda.get_device_name(ctx.device)
+
+        per_rank_summaries = parse_multi_rank_nsight(
+            per_rank_raw=per_rank_raw,
+            device_name=device_name,
+            kernel_breakdown=kernel_breakdown,
+        )
+
+        if len(per_rank_summaries) < world_size:
+            missing = sorted(
+                set(range(world_size)) - set(per_rank_summaries.keys())
+            )
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                output=(
+                    f"profile_kernel FAILED (multi-rank): parsed "
+                    f"{len(per_rank_summaries)}/{world_size} ranks; "
+                    f"missing ranks={missing}."
+                ),
+                metadata={
+                    "error": "incomplete per_rank",
+                    "world_size": world_size,
+                    "missing_ranks": missing,
+                },
+            )
+
+        prev_per_rank = ctx._last_per_rank_profile_summary or {}
+
+        rendered: list[str] = [
+            f"profile_kernel PASSED: profiling complete "
+            f"(world_size={world_size}, all ranks measured separately).\n"
+        ]
+        for rank_id, summary in per_rank_summaries.items():
+            previous = prev_per_rank.get(rank_id)
+            rendered.append("")
+            rendered.append(f"========== Rank {rank_id} ==========")
+            rendered.append(summary.format_for_llm(previous=previous))
+
+        # Persist for next-iteration deltas.
+        ctx._last_per_rank_profile_summary = per_rank_summaries
+
+        # Compact metadata: just rank 0 summary plus per-rank gpu_time spread
+        gpu_times = [
+            s.gpu_time_us for s in per_rank_summaries.values()
+            if s.gpu_time_us is not None
+        ]
+        gpu_time_spread = (
+            (max(gpu_times) - min(gpu_times)) if len(gpu_times) >= 2 else None
+        )
+        rank0 = per_rank_summaries[min(per_rank_summaries.keys())]
+
+        result = ToolResult(
+            tool_name=self.name,
+            success=True,
+            output="\n".join(rendered),
+            metadata={
+                "world_size": world_size,
+                "n_ranks_measured": len(per_rank_summaries),
+                "rank0_bottleneck": rank0.bottleneck,
+                "rank0_dram_utilization_pct": rank0.dram_utilization_pct,
+                "rank0_occupancy_pct": rank0.occupancy_pct,
+                "per_rank_gpu_time_us": {
+                    str(r): s.gpu_time_us
+                    for r, s in per_rank_summaries.items()
+                },
+                "gpu_time_spread_us": gpu_time_spread,
             },
         )
         self._profile_cache[cache_key] = result
@@ -680,11 +1076,32 @@ class GetGpuSpecsTool(Tool):
         else:
             lines.append("  (no detailed spec entry for this GPU in gpu_specs.py)")
 
+        # Node-shape line. For multi-rank evals (e.g. 8xH100 sweep), reflect
+        # the full node so the model knows it can launch on all ranks.
+        ws = max(1, int(getattr(ctx, "distributed_torchrun_world_size", 1) or 1))
+        if ws > 1:
+            try:
+                visible = int(torch.cuda.device_count())
+            except Exception:
+                visible = ws
+            lines.append("")
+            lines.append(
+                f"Node shape: this problem is evaluated on {ws}x {device_name} "
+                f"({visible} GPU(s) visible to the parent process). Your "
+                f"ModelNew runs inside a torchrun world_size={ws} subprocess; "
+                f"each rank owns one device (cuda:LOCAL_RANK) and can use "
+                f"torch.distributed collectives (NCCL) across the node."
+            )
+
         return ToolResult(
             tool_name=self.name,
             success=True,
             output="\n".join(lines),
-            metadata={"device_name": device_name, "spec_key": spec_key},
+            metadata={
+                "device_name": device_name,
+                "spec_key": spec_key,
+                "world_size": ws,
+            },
         )
 
 
@@ -761,18 +1178,51 @@ class SubmitKernelTool(Tool):
     input_schema = _KERNEL_CODE_SCHEMA
 
     def execute(self, ctx: ToolContext, kernel_code: str, **_) -> ToolResult:
+        # Resolve dynamic timeouts (may probe the reference forward once).
+        _dyn_correctness_s, dyn_submit_s = _resolve_dynamic_eval_timeouts(ctx)
+
         # If the agent has an eval RPC client wired up (set by run_sweep.py
         # when it spawns per-GPU eval servers), route the heavy correctness
         # + perf-timing work to the server. Decouples eval lifetime from
         # agent worker lifetime so a stuck eval doesn't starve other agents
         # past their worker_timeout_s.
         if ctx.eval_client is not None:
-            return ctx.eval_client.submit_kernel(ctx, kernel_code)
+            return ctx.eval_client.submit_kernel(
+                ctx, kernel_code, timeout_s=dyn_submit_s
+            )
 
         build_dir = _per_kernel_build_dir(ctx.build_dir, kernel_code)
         try:
-            result: KernelExecResult | None = _run_with_oom_retry(
-                lambda: _retry_eval_on_lock(lambda: eval_kernel_against_ref(
+
+            def _run_eval_once() -> KernelExecResult | None:
+                ws = max(1, int(ctx.distributed_torchrun_world_size or 1))
+                # Multi-rank trigger: world_size > 1 alone. No longer gated on
+                # whether the reference imports distributed_collectives — the
+                # 8xH100 sweep deliberately runs non-collective oracles on
+                # all 8 ranks (rank 0 reports, others redundantly compute).
+                if ws > 1:
+                    tr = eval_kernel_via_torchrun(
+                        world_size=ws,
+                        original_model_src=ctx.ref_arch_src,
+                        custom_model_src=kernel_code,
+                        seed_num=42,
+                        num_correct_trials=ctx.num_correct_trials,
+                        num_perf_trials=ctx.num_perf_trials,
+                        measure_performance=True,
+                        timing_method=ctx.timing_method,
+                        verbose=ctx.verbose,
+                        build_dir=build_dir,
+                        backend=ctx.backend,
+                        precision_str=ctx.precision,
+                        check_for_excessive_speedup=True,
+                        timeout_s=int(dyn_submit_s),
+                    )
+                    if tr is not None:
+                        return tr
+                    # Too few GPUs visible after clearing CUDA_VISIBLE_DEVICES:
+                    # fall through to single-GPU eval.
+
+                return eval_kernel_against_ref(
                     original_model_src=ctx.ref_arch_src,
                     custom_model_src=kernel_code,
                     num_correct_trials=ctx.num_correct_trials,
@@ -785,7 +1235,13 @@ class SubmitKernelTool(Tool):
                     backend=ctx.backend,
                     precision=ctx.torch_precision,
                     check_for_excessive_speedup=True,
-                ), build_dir=build_dir)
+                )
+
+            result: KernelExecResult | None = _run_with_oom_retry(
+                lambda: _retry_eval_on_lock(
+                    lambda: _run_eval_once(),
+                    build_dir=build_dir,
+                )
             )
         except BaseException as exc:
             if _is_cuda_oom(exc):

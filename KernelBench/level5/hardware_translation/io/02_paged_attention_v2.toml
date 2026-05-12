@@ -27,3 +27,8 @@ def get_init_inputs():
 
 # ModelNew must define __init__(*get_init_inputs()) and forward(*get_inputs()) so outputs match the hidden reference implementation on the evaluation GPU.
 """
+
+# Multi-rank (torchrun) world size for submit_kernel / run_correctness /
+# profile_kernel. 8 = full 8xH100 node; sweep TOML default is overridden
+# per-problem from this value.
+distributed_world_size = 8

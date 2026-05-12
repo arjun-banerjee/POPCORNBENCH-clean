@@ -1,0 +1,111 @@
+# Level-5 hardware translation (8xH100): full tool registry (`tools = "all"`).
+#
+# Multi-rank sibling of configs/sweep.l5_hw_translation_all.toml. Adds
+# profile_kernel (multi-rank ncu around an 8-rank torchrun), disassemble_kernel,
+# and ert_roofline on top of the default set. One agent at a time owns the full
+# 8-GPU node.
+#
+# See sweep.l5_hw_translation_8xh100_single_turn.toml header for parallelism
+# rationale.
+#
+# Usage:
+#   uv run python scripts/run_sweep.py configs/sweep.l5_hw_translation_8xh100_all.toml
+# See also: configs/sweep.l5_hw_translation_8xh100_default.toml,
+#           configs/sweep.l5_hw_translation_8xh100_single_turn.toml,
+#           scripts/run_l5_hw_translation_8xh100_sweeps.sh
+
+[run]
+name                    = "fl5_hw_translation_8xh100_all_gpt"
+dataset_src             = "local"
+variants                = ["hardware_translation_stub"]
+levels                  = [5]
+# Problems 29 & 30 have no kernels/8xa100/<stem>.cu source; omit to avoid prompt-build failures.
+problem_subset          = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 22, 23, 25, 26, 27, 28]
+backend                 = "cuda"
+precision               = "fp16"
+gpu_arch                = ["Hopper"]
+timing_method           = "cuda_event"
+num_correct_trials      = 5
+num_perf_trials         = 50
+tools                   = "all"
+
+# Hardware translation: 8xA100 .cu in prompt; I/O from TOML; oracle Python in hardware_translation/oracle/.
+prompt_option                    = "hardware_translation"
+source_hardware_gpu_name         = "A100"
+hardware_gpu_name                = "H100"
+# Anchor the prompt at the 8x node shape (see sweep.l5_hw_translation_8xh100.toml).
+target_node_shape                = "8x"
+source_node_shape                = "8x"
+source_kernel_dir                = "KernelBench/level5/kernels/8xa100"
+hidden_reference_kernel_dir      = "KernelBench/level5/kernels/8xh100"
+hardware_translation_io_dir      = "KernelBench/level5/hardware_translation/io"
+hardware_translation_oracle_dir  = "KernelBench/level5/hardware_translation/oracle"
+
+[agent]
+max_turns               = 15
+max_tool_calls          = 30
+warn_turns_remaining    = 3
+reasoning_effort        = "medium"
+llm_error_retries       = 5
+tool_output_context_max_chars = 120000
+reasoning_context_max_chars = 0
+chat_context_tail_messages = 96
+# Default world size for the 8xH100 sweep — overridden per problem when an
+# io/*.toml sets distributed_world_size.
+distributed_torchrun_world_size = 8
+# Multi-rank torchrun eval timeout (s). profile_kernel uses its own internal
+# 1800s timeout (ProfileKernelTool._MULTI_RANK_TIMEOUT_S).
+eval_torchrun_timeout_s = 5400
+
+[parallelism]
+# Comm-sweep style: one work item at a time owns all 8 GPUs.
+multi_gpu               = true
+num_gpu_devices         = 1
+agents_per_gpu          = 1
+use_eval_queue          = false
+perf_lock_per_gpu       = false
+# tools=all adds profile_kernel (1800s per call) on top of submit/correctness
+# (~5400s each). 15-turn budget can chain many heavy calls — leave a generous
+# wall budget. With use_eval_queue=false there is no eval RPC, so the SIGALRM /
+# queue corruption concern from the 1xH100 `all` config does NOT apply here.
+worker_timeout_s        = 21600
+llm_global_concurrency  = 0
+
+[report]
+enabled                 = true
+refresh_seconds         = 60
+serve                   = true
+serve_host              = "0.0.0.0"
+serve_port              = 8765
+
+# Models: same `[[models]]` block in every sweep.l5_hw_translation_8xh100*.toml (cross-run comparability).
+[[models]]
+name                    = "gpt-5.5-priority"
+api_kind                = "openai"
+base_url                = "https://popcorn-centralus-resource.services.ai.azure.com/openai/v1/"
+api_key_env             = "POPCORN_CENTRAL_AZURE_KEY"
+rpm                     = 250
+tpm                     = 250000
+reasoning_effort        = "medium"
+
+# GLM-5 on Azure OpenAI v1 (Foundry partner) — set POPCORN_AZURE_KEY.
+[[models]]
+name                    = "FW-GLM-5-1"
+api_kind                = "openai_chat"
+base_url                = "https://popcorn-foundry-resource.openai.azure.com/openai/v1/"
+api_key_env             = "POPCORN_AZURE_KEY"
+rpm                     = 250
+tpm                     = 250000
+omit_chat_run_meta      = true
+
+
+# xAI Grok — set XAI_API_KEY (see configs/sweep.grok.toml).
+[[models]]
+name                    = "grok-4.3"
+api_kind                = "openai_chat"
+base_url                = "https://api.x.ai/v1"
+api_key_env             = "XAI_API_KEY"
+deployment_name         = "grok-4.3"
+request_timeout_s       = 3600
+rpm                     = 60
+tpm                     = 200000

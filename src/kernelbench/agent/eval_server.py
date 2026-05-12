@@ -271,4 +271,13 @@ def _build_server_context(args: dict[str, Any], device) -> "Any":
         num_perf_trials=int(args.get("num_perf_trials", 100)),
         timing_method=args.get("timing_method", "cuda_event"),
         verbose=bool(args.get("verbose", False)),
+        # See eval_client._ctx_args — the queue path is pinned to one GPU so
+        # in practice the server cannot drive torchrun and we'd never see
+        # ws > 1 here. We still preserve the values for symmetry.
+        distributed_torchrun_world_size=int(
+            args.get("distributed_torchrun_world_size", 1) or 1
+        ),
+        eval_torchrun_timeout_s=int(
+            args.get("eval_torchrun_timeout_s", 3600) or 3600
+        ),
     )

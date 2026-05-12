@@ -166,6 +166,13 @@ class KernelAgent:
         omit_chat_run_meta: If true, omit ``popcornbench_run_meta`` from
             ``chat.completions.create`` extra body (strict Azure chat gateways
             may reject unknown JSON keys).
+        distributed_torchrun_world_size: When >1, submit_kernel / run_correctness
+            / profile_kernel run their work under a torchrun --nproc_per_node=N
+            subprocess so the kernel can use all N GPUs. Default 1 = single GPU.
+            For the 8xH100 sweep this is 8.
+        eval_torchrun_timeout_s: Wall-clock budget per torchrun subprocess used
+            by submit_kernel / run_correctness. profile_kernel uses a fixed
+            larger budget because ncu + multi-rank attach is slower.
     """
 
     def __init__(
@@ -203,6 +210,16 @@ class KernelAgent:
         reasoning_context_max_chars: int = 16_000,
         chat_context_tail_messages: int | None = None,
         llm_concurrency_semaphore: Any = None,
+        distributed_torchrun_world_size: int = 1,
+        eval_torchrun_timeout_s: int = 3600,
+        dynamic_eval_timeout: bool = False,
+        correctness_overhead_s: int = 120,
+        correctness_timeout_k: float = 10.0,
+        correctness_floor_s: int = 120,
+        submit_overhead_s: int = 180,
+        submit_timeout_k: float = 10.0,
+        submit_floor_s: int = 300,
+        reference_probe_timeout_s: int = 300,
     ) -> None:
         self.problem_id = problem_id
         self.level = level
@@ -255,6 +272,18 @@ class KernelAgent:
             timing_method=timing_method,
             verbose=verbose,
             eval_client=eval_client,
+            distributed_torchrun_world_size=max(1, int(distributed_torchrun_world_size or 1)),
+            eval_torchrun_timeout_s=max(60, int(eval_torchrun_timeout_s or 3600)),
+            dynamic_eval_timeout=bool(dynamic_eval_timeout),
+            correctness_overhead_s=max(0, int(correctness_overhead_s)),
+            correctness_timeout_k=float(correctness_timeout_k),
+            correctness_floor_s=max(0, int(correctness_floor_s)),
+            submit_overhead_s=max(0, int(submit_overhead_s)),
+            submit_timeout_k=float(submit_timeout_k),
+            submit_floor_s=max(0, int(submit_floor_s)),
+            reference_probe_timeout_s=max(30, int(reference_probe_timeout_s)),
+            level=int(level),
+            problem_id=int(problem_id),
         )
 
         # Optional override for the first user message (e.g. hw_translation prompt).

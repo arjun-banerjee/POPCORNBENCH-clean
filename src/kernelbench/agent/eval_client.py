@@ -28,12 +28,26 @@ class EvalRPCClient:
     passed in via run_one's args.
     """
 
+    # Margin between the eval RPC client's response wait and the inner
+    # torchrun subprocess timeout. Lets the server detect a torchrun timeout
+    # and ship the failure result back to us BEFORE we declare the RPC dead.
+    _RPC_MARGIN_S: int = 60
+
     def __init__(self, request_q, response_q, *, default_timeout_s: int = 3600):
         self._request_q = request_q
         self._response_q = response_q
         self._default_timeout_s = default_timeout_s
 
-    def _ctx_args(self, ctx) -> dict:
+    def _ctx_args(self, ctx, *, timeout_s: int | None = None) -> dict:
+        # ``timeout_s`` overrides the static ``eval_torchrun_timeout_s`` from
+        # the context when a caller (RunCorrectnessTool / SubmitKernelTool)
+        # has already resolved a dynamic per-tool timeout. This is what the
+        # eval server uses to bound the torchrun subprocess it spawns.
+        effective_torchrun_timeout = int(
+            timeout_s
+            if timeout_s is not None
+            else (getattr(ctx, "eval_torchrun_timeout_s", 3600) or 3600)
+        )
         return {
             "ref_arch_src": ctx.ref_arch_src,
             "backend": ctx.backend,
@@ -43,19 +57,27 @@ class EvalRPCClient:
             "num_perf_trials": ctx.num_perf_trials,
             "timing_method": ctx.timing_method,
             "verbose": ctx.verbose,
+            # Multi-rank knobs. Servers can ignore these (they're pinned to a
+            # single GPU and so cannot drive torchrun), but we forward them
+            # for API symmetry — a future "hybrid" eval server could spawn
+            # torchrun on demand.
+            "distributed_torchrun_world_size": int(
+                getattr(ctx, "distributed_torchrun_world_size", 1) or 1
+            ),
+            "eval_torchrun_timeout_s": effective_torchrun_timeout,
         }
 
-    def submit_kernel(self, ctx, kernel_code: str):
-        args = {"kernel_code": kernel_code, **self._ctx_args(ctx)}
-        return self._call("submit", args)
+    def submit_kernel(self, ctx, kernel_code: str, *, timeout_s: int | None = None):
+        args = {"kernel_code": kernel_code, **self._ctx_args(ctx, timeout_s=timeout_s)}
+        return self._call("submit", args, rpc_timeout_s=self._rpc_wait(timeout_s))
 
     def compile_kernel(self, ctx, kernel_code: str):
         args = {"kernel_code": kernel_code, **self._ctx_args(ctx)}
         return self._call("compile", args)
 
-    def run_correctness(self, ctx, kernel_code: str):
-        args = {"kernel_code": kernel_code, **self._ctx_args(ctx)}
-        return self._call("correctness", args)
+    def run_correctness(self, ctx, kernel_code: str, *, timeout_s: int | None = None):
+        args = {"kernel_code": kernel_code, **self._ctx_args(ctx, timeout_s=timeout_s)}
+        return self._call("correctness", args, rpc_timeout_s=self._rpc_wait(timeout_s))
 
     def get_gpu_specs(self, ctx):
         args = self._ctx_args(ctx)
@@ -80,7 +102,26 @@ class EvalRPCClient:
         ctx._last_profile_summary = new_summary
         return result
 
-    def _call(self, kind: str, args: dict, *, return_aux: bool = False):
+    def _rpc_wait(self, inner_timeout_s: int | None) -> int | None:
+        """Compute the response-queue wait for a per-call inner timeout.
+
+        ``inner_timeout_s`` is the torchrun subprocess cap the server will
+        use. We wait that long plus a small margin so the server has a
+        chance to ship back a clean timeout failure before our RPC fires.
+        Returns ``None`` to mean "use the default timeout".
+        """
+        if inner_timeout_s is None:
+            return None
+        return max(int(inner_timeout_s) + self._RPC_MARGIN_S, self._default_timeout_s)
+
+    def _call(
+        self,
+        kind: str,
+        args: dict,
+        *,
+        return_aux: bool = False,
+        rpc_timeout_s: int | None = None,
+    ):
         from kernelbench.agent.tools import ToolResult
 
         rid = uuid.uuid4().hex
@@ -108,15 +149,16 @@ class EvalRPCClient:
         #      it from poisoning every later RPC for this worker: skip
         #      malformed payloads and keep waiting against an absolute
         #      deadline, so we still time out cleanly.
-        end_at = time.monotonic() + self._default_timeout_s
+        wait_s = int(rpc_timeout_s) if rpc_timeout_s is not None else int(self._default_timeout_s)
+        end_at = time.monotonic() + wait_s
         while True:
             remaining = end_at - time.monotonic()
             if remaining <= 0:
-                return _timeout_result(kind, self._default_timeout_s, return_aux)
+                return _timeout_result(kind, wait_s, return_aux)
             try:
                 payload = self._response_q.get(timeout=remaining)
             except _queue.Empty:
-                return _timeout_result(kind, self._default_timeout_s, return_aux)
+                return _timeout_result(kind, wait_s, return_aux)
 
             if not isinstance(payload, tuple) or len(payload) != 3:
                 logger.warning(

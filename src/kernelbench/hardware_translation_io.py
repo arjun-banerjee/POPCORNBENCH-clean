@@ -69,6 +69,19 @@ def extract_io_contract_src(python_src: str) -> str:
     return "\n".join(parts)
 
 
+def _io_toml_path(*, repo_top: str, io_dir: str, problem_name: str) -> str:
+    """Resolve the per-problem I/O TOML path. Raises if io_dir is unset."""
+    if not io_dir or not str(io_dir).strip():
+        raise ValueError(
+            "hardware_translation requires hardware_translation_io_dir "
+            "(directory of per-problem .toml files with a `contract` field)."
+        )
+    rel = io_dir.strip()
+    path_dir = rel if os.path.isabs(rel) else os.path.join(repo_top, rel)
+    stem, _ = os.path.splitext(problem_name)
+    return os.path.join(path_dir, f"{stem}.toml")
+
+
 def load_io_contract_from_toml(
     *,
     repo_top: str,
@@ -81,16 +94,7 @@ def load_io_contract_from_toml(
     ``io_dir`` is relative to ``repo_top`` and must contain ``{stem}.toml`` with
     a ``contract = '''...'''`` string (see ``level5/hardware_translation/io``).
     """
-    if not io_dir or not str(io_dir).strip():
-        raise ValueError(
-            "hardware_translation requires hardware_translation_io_dir "
-            "(directory of per-problem .toml files with a `contract` field)."
-        )
-
-    rel = io_dir.strip()
-    path_dir = rel if os.path.isabs(rel) else os.path.join(repo_top, rel)
-    stem, _ = os.path.splitext(problem_name)
-    path = os.path.join(path_dir, f"{stem}.toml")
+    path = _io_toml_path(repo_top=repo_top, io_dir=io_dir, problem_name=problem_name)
     if not os.path.isfile(path):
         raise FileNotFoundError(f"I/O contract TOML not found: {path}")
     with open(path, "rb") as f:
@@ -99,6 +103,47 @@ def load_io_contract_from_toml(
     if not contract or not str(contract).strip():
         raise ValueError(f"TOML at {path} must contain a non-empty `contract` string")
     return str(contract).strip()
+
+
+def load_io_distributed_world_size(
+    *,
+    repo_top: str,
+    io_dir: str,
+    problem_name: str,
+    default: int = 1,
+) -> int:
+    """Return the per-problem ``distributed_world_size`` from the I/O TOML.
+
+    Hardware-translation problems opt in to multi-rank (torchrun) evaluation
+    by setting ``distributed_world_size = 8`` (or another small int) next to
+    ``contract`` in their I/O TOML. Sweeps consult this value to override the
+    sweep-wide ``[agent].distributed_torchrun_world_size`` default per problem,
+    so a single sweep can mix single-GPU and 8-GPU problems.
+
+    Returns ``default`` when the TOML is missing the key (back-compat for
+    older I/O contracts) or unparseable as a positive int.
+    """
+    try:
+        path = _io_toml_path(
+            repo_top=repo_top, io_dir=io_dir, problem_name=problem_name
+        )
+    except ValueError:
+        return default
+    if not os.path.isfile(path):
+        return default
+    try:
+        with open(path, "rb") as f:
+            data = tomli.load(f)
+    except Exception:
+        return default
+    raw = data.get("distributed_world_size", default)
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if val < 1:
+        return default
+    return val
 
 
 def load_oracle_reference_source(

@@ -42,6 +42,7 @@ from kernelbench.agent import KernelAgent, get_tools
 from kernelbench.dataset import construct_kernelbench_dataset
 from kernelbench.hardware_translation_io import (
     load_io_contract_from_toml,
+    load_io_distributed_world_size,
     load_oracle_reference_source,
 )
 from kernelbench.prompt_constructor_toml import get_hardware_translation_prompt
@@ -377,6 +378,13 @@ def run_one(
             # Build a custom initial message + eval reference for hw_translation mode.
             initial_message = None
             eval_ref_src = problem.code
+            # Per-problem multi-rank world size. The sweep TOML sets a default
+            # via [agent].distributed_torchrun_world_size; the hardware_translation
+            # I/O TOML can override it per problem so a single sweep can mix
+            # single-GPU and multi-GPU problems.
+            problem_world_size = int(
+                agent_cfg.get("distributed_torchrun_world_size", 1) or 1
+            )
             if run_cfg.get("prompt_option") == "hardware_translation":
                 source_kernel_src = _load_source_kernel(run_cfg, problem, work.level)
                 io_dir = run_cfg.get("hardware_translation_io_dir")
@@ -386,6 +394,13 @@ def run_one(
                     io_dir=io_dir,
                     problem_name=problem.name,
                 )
+                problem_world_size = load_io_distributed_world_size(
+                    repo_top=REPO_TOP_DIR,
+                    io_dir=io_dir,
+                    problem_name=problem.name,
+                    default=problem_world_size,
+                )
+                stem = os.path.splitext(problem.name)[0]
                 initial_message = get_hardware_translation_prompt(
                     io_contract_src=io_contract,
                     source_kernel_src=source_kernel_src,
@@ -393,6 +408,13 @@ def run_one(
                     source_gpu_name=run_cfg["source_hardware_gpu_name"],
                     target_gpu_name=run_cfg["hardware_gpu_name"],
                     precision=precision,
+                    target_node_shape=run_cfg.get("target_node_shape"),
+                    source_node_shape=run_cfg.get("source_node_shape"),
+                    target_world_size=problem_world_size,
+                    problem_stem=stem,
+                    hidden_reference_kernel_dir=run_cfg.get(
+                        "hidden_reference_kernel_dir"
+                    ),
                 )
                 eval_ref_src = load_oracle_reference_source(
                     repo_top=REPO_TOP_DIR,
@@ -458,6 +480,34 @@ def run_one(
                     model_cfg.get("omit_responses_reasoning", False)
                 ),
                 omit_chat_run_meta=bool(model_cfg.get("omit_chat_run_meta", False)),
+                distributed_torchrun_world_size=problem_world_size,
+                eval_torchrun_timeout_s=int(
+                    agent_cfg.get("eval_torchrun_timeout_s", 3600) or 3600
+                ),
+                dynamic_eval_timeout=bool(
+                    agent_cfg.get("dynamic_eval_timeout", False)
+                ),
+                correctness_overhead_s=int(
+                    agent_cfg.get("correctness_overhead_s", 120)
+                ),
+                correctness_timeout_k=float(
+                    agent_cfg.get("correctness_timeout_k", 10.0)
+                ),
+                correctness_floor_s=int(
+                    agent_cfg.get("correctness_floor_s", 120)
+                ),
+                submit_overhead_s=int(
+                    agent_cfg.get("submit_overhead_s", 180)
+                ),
+                submit_timeout_k=float(
+                    agent_cfg.get("submit_timeout_k", 10.0)
+                ),
+                submit_floor_s=int(
+                    agent_cfg.get("submit_floor_s", 300)
+                ),
+                reference_probe_timeout_s=int(
+                    agent_cfg.get("reference_probe_timeout_s", 300)
+                ),
             )
 
             # Lock fallback: when the eval queue is NOT in use (e.g. legacy
@@ -709,6 +759,18 @@ def main():
         (2, "popcorn"): {2, 11, 18, 27, 34, 38},
     }
 
+    # In multi_gpu_mode, L5 hardware_translation_stub problems are also routed
+    # through the comm-sweep path (one work item owns the whole 8-GPU node).
+    # We allow ALL of them through the filter — per-problem opt-in is done
+    # downstream via distributed_world_size in each io/*.toml. A problem that
+    # left distributed_world_size at 1 still runs here, just on a single rank,
+    # which is the desired fallback for problems whose I/O contract hasn't
+    # been opted in yet.
+    ALWAYS_ALLOW_IN_MULTI_GPU = {
+        # (level, variant)
+        (5, "hardware_translation_stub"),
+    }
+
     work_items: list[WorkItem] = []
     num_gpus = par_cfg["num_gpu_devices"]
     n_skipped_multi_gpu = 0
@@ -735,10 +797,19 @@ def main():
             # Filter the multi-GPU problems based on the run mode:
             # - non-multi_gpu run: drop them (they would crash trying to
             #   init NCCL with one visible GPU)
-            # - multi_gpu run: keep only them
+            # - multi_gpu run: keep MULTI_GPU_PROBLEMS for this (level, variant)
+            #   plus any (level, variant) in ALWAYS_ALLOW_IN_MULTI_GPU (which
+            #   permits the whole subset — used for L5 hw-translation where
+            #   opt-in is per-problem via the io/*.toml).
             mg_set = MULTI_GPU_PROBLEMS.get((int(level), variant), set())
             if multi_gpu_mode:
-                pids = [p for p in pids if int(p) in mg_set]
+                if (int(level), variant) in ALWAYS_ALLOW_IN_MULTI_GPU:
+                    # All problems for this (level, variant) are eligible;
+                    # MULTI_GPU_PROBLEMS additionally allows the listed ones
+                    # that aren't already in the subset.
+                    pids = [p for p in pids if (int(p) in mg_set) or True]
+                else:
+                    pids = [p for p in pids if int(p) in mg_set]
             else:
                 before = len(pids)
                 pids = [p for p in pids if int(p) not in mg_set]

@@ -260,9 +260,35 @@ def render_prompt_by_option(
     if option == "hardware_translation":
         hw_trans_ps = shared.get("hardware_translation_problem_statement", "")
         hw_trans_instr = shared.get("hardware_translation_instruction", "")
+        # Multi-rank / node-shape anchoring. The renderer accepts optional
+        # ``target_node_shape`` / ``source_node_shape`` (e.g. "8x") and
+        # ``target_world_size`` (e.g. 8) in the context. When unset or
+        # world_size <= 1, the rendered prompt looks like the single-GPU
+        # baseline. When world_size > 1, the prompt anchors on "8xH100",
+        # explains the torchrun harness, and references the hidden
+        # ``kernels/{shape}{gpu_name_lower}/<stem>.cu`` reference by stem.
+        target_node_shape = str(context.get("target_node_shape", "") or "")
+        source_node_shape = str(context.get("source_node_shape", "") or "")
+        target_world_size = int(context.get("target_world_size", 1) or 1)
+        problem_stem = str(context.get("problem_stem", "") or "")
+
+        if target_world_size > 1:
+            multi_rank_block = shared.get(
+                "hardware_translation_multi_rank_block", ""
+            )
+        else:
+            multi_rank_block = shared.get(
+                "hardware_translation_single_rank_block", ""
+            )
+
         context.update({
             "hardware_translation_problem_statement": hw_trans_ps,
             "hardware_translation_instruction": hw_trans_instr,
+            "multi_rank_block": multi_rank_block,
+            "target_node_shape": target_node_shape,
+            "source_node_shape": source_node_shape,
+            "target_world_size": target_world_size,
+            "problem_stem": problem_stem,
         })
 
     # Load precision details if provided
@@ -419,6 +445,45 @@ def render_prompt_by_option(
                 f"Source hardware component in option '{option}'; provide gpu_specs_py and source_gpu_name"
             )
         context = {**context, **_source_gpu_context_from_gpu_specs(resolve_path(gpu_specs_py), source_gpu_name)}
+
+    # Derive node-shape phrases so hardware_specs / source_hardware_specs and
+    # the hardware_translation_* templates can both consume "{target_node_phrase}".
+    # When a shape is provided (e.g. "8x"), produce "an 8x H100 node";
+    # otherwise the bare "an NVIDIA H100" phrasing keeps single-GPU prompts
+    # reading naturally.
+    shape_t = str(context.get("target_node_shape", "") or "")
+    shape_s = str(context.get("source_node_shape", "") or "")
+    if "gpu_name" in context:
+        context.setdefault(
+            "target_node_phrase",
+            f"an {shape_t} {context['gpu_name']} node"
+            if shape_t
+            else f"an NVIDIA {context['gpu_name']}",
+        )
+        context.setdefault(
+            "target_gpu_name_lower",
+            str(context.get("gpu_name", "")).lower(),
+        )
+    if "source_gpu_name" in context:
+        context.setdefault(
+            "source_node_phrase",
+            f"an {shape_s} {context['source_gpu_name']} node"
+            if shape_s
+            else f"an NVIDIA {context['source_gpu_name']}",
+        )
+
+    # Pre-render multi_rank_block now that the GPU-name / shape placeholders
+    # are settled. Python's str.format does one pass, so we have to interpolate
+    # the inner placeholders here rather than rely on the final format(**context).
+    if "multi_rank_block" in context:
+        try:
+            context["multi_rank_block"] = str(
+                context["multi_rank_block"]
+            ).format(**context)
+        except KeyError:
+            # Leave the block verbatim; the outer format() will surface the
+            # missing key with a clear message.
+            pass
     
     # Builds the prompt from the components in the toml file.
     prompt_parts = []
@@ -587,6 +652,11 @@ def get_hardware_translation_prompt(
     source_gpu_name: str,
     target_gpu_name: str,
     precision: Optional[str] = None,
+    target_node_shape: Optional[str] = None,
+    source_node_shape: Optional[str] = None,
+    target_world_size: int = 1,
+    problem_stem: Optional[str] = None,
+    hidden_reference_kernel_dir: Optional[str] = None,
 ) -> str:
     """
     Hardware-translation prompt: re-optimize source-DSL device code tuned for
@@ -594,17 +664,35 @@ def get_hardware_translation_prompt(
 
     ``io_contract_src`` is the tensor / RNG contract shown to the model (no
     oracle ``Model``). It usually comes from ``load_io_contract_from_toml``.
+
+    Multi-rank arguments (``target_node_shape``, ``source_node_shape``,
+    ``target_world_size``, ``problem_stem``) anchor the prompt at the full
+    node when set. With ``target_world_size > 1`` the renderer phrases the
+    target as e.g. "an 8x H100 node", explains the torchrun harness, and
+    references the hidden 8xH100 reference at
+    ``KernelBench/level5/kernels/8xh100/<problem_stem>.cu`` *by stem only*
+    — the file itself is never injected. With ``target_world_size <= 1``
+    the prompt collapses to the original single-device wording.
+
+    ``hidden_reference_kernel_dir`` is recorded in the trajectory for
+    bookkeeping; the renderer does not read its contents.
     """
     backend_lower = backend.lower()
+    context = {
+        "source_kernel_src": source_kernel_src,
+        "source_backend": backend_lower,
+        "io_contract_src": io_contract_src,
+        "target_node_shape": target_node_shape or "",
+        "source_node_shape": source_node_shape or "",
+        "target_world_size": int(target_world_size or 1),
+        "problem_stem": problem_stem or "",
+        "hidden_reference_kernel_dir": hidden_reference_kernel_dir or "",
+    }
     return render_prompt_by_option(
         prompts_toml=PROMPTS_TOML,
         backend=backend_lower,
         option="hardware_translation",
-        context={
-            "source_kernel_src": source_kernel_src,
-            "source_backend": backend_lower,
-            "io_contract_src": io_contract_src,
-        },
+        context=context,
         precision=precision,
         include_hardware=False,
         gpu_specs_py=GPU_SPECS_PY,
