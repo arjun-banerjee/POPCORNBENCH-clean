@@ -2,11 +2,18 @@
 
 Only the kernels below were strict enough to vendor as handwritten CUDA references.
 
+Interpretation:
+- entries below are `exact reference kernels`
+- repeated upstream kernels are intentional when multiple Popcorn kernels share the same primitive
+- these are appropriate for direct baseline comparison, not just component-level inspection
+
 | Local kernel | Type | Vendored ref kernel(s) | Upstream |
 |---|---|---|---|
 | `1_Conv1d_Depthwise.py` | depthwise 1D conv (non-causal, groups=channels) | `./sources/pytorch_aten_depthwise_conv2d.cu` | [`pytorch/aten/src/ATen/native/cuda/DepthwiseConv2d.cu`](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/cuda/DepthwiseConv2d.cu) |
+| `2_GraphEdgeSoftmaxCSR.py` | CSR row-wise edge softmax | `./sources/cogdl_edge_softmax.cu` | [`THUDM/CogDL/cogdl/operators/edge_softmax/edge_softmax.cu`](https://github.com/THUDM/CogDL/blob/master/cogdl/operators/edge_softmax/edge_softmax.cu) |
 | `3_CSRSpMMMessagePassing.py` | CSR sparse message passing | `./sources/dgl_spmm.cu` | [`dmlc/dgl/src/array/cuda/spmm.cu`](https://github.com/dmlc/dgl/blob/master/src/array/cuda/spmm.cu) |
 | `5_Conv1d_Causal.py` | causal conv1d | `./sources/causal_conv1d_fwd.cu` | [`Dao-AILab/causal-conv1d/csrc/causal_conv1d_fwd.cu`](https://github.com/Dao-AILab/causal-conv1d/blob/main/csrc/causal_conv1d_fwd.cu) |
+| `6_EdgeSoftmaxMultiHeadCSR.py` | multi-head CSR edge softmax | `./sources/cogdl_edge_softmax.cu` | [`THUDM/CogDL/cogdl/operators/edge_softmax/edge_softmax.cu`](https://github.com/THUDM/CogDL/blob/master/cogdl/operators/edge_softmax/edge_softmax.cu) |
 | `7_Conv1d_FFT.py` | FFT-based depthwise conv1d (rfft → pointwise multiply → irfft) | `./sources/h3_fftconv_cuda.cu` | [`HazyResearch/H3/csrc/fftconv/fftconv_cuda.cu`](https://github.com/HazyResearch/H3/blob/main/csrc/fftconv/fftconv_cuda.cu) |
 | `9_AssociativeScan.py` | SSM linear recurrence / selective scan (parallel prefix) | `./sources/mamba_selective_scan_fwd_fp32.cu` | [`state-spaces/mamba/csrc/selective_scan/selective_scan_fwd_fp32.cu`](https://github.com/state-spaces/mamba/blob/main/csrc/selective_scan/selective_scan_fwd_fp32.cu) |
 | `10_SampledDenseDenseMatmulEdges.py` | sampled edge dot products (SDDMM COO) | `./sources/dgl_sddmm.cu` | [`dmlc/dgl/src/array/cuda/sddmm.cu`](https://github.com/dmlc/dgl/blob/master/src/array/cuda/sddmm.cu) |
@@ -24,9 +31,7 @@ Only the kernels below were strict enough to vendor as handwritten CUDA referenc
 
 Excluded from this directory (no exact single `.cu` execution-pattern match found):
 
-- `2_GraphEdgeSoftmaxCSR.py` — DGL edge softmax is multi-pass segment reduce (no standalone .cu); pytorch_scatter `segment_csr_cuda.cu` handles sum/max/min only, not softmax
 - `4_GJKRobotEnvironmentIntersection.py` — openGJK GPU is full 3-D; cuRobo uses sphere-sphere; no 2-D AABB-triangle SAT .cu found
-- `6_EdgeSoftmaxMultiHeadCSR.py` — same issue as kernel 2; multi-head makes standalone match harder
 - `8_SegmentTopKCSR.py` — moderngpu segsort is `.cuh` header-only; no public per-row top-k CSR `.cu` found
 - `21_RadialBasisFunctionExpansion.py` — NNPOps ANI `computeRadialFunctions` aggregates over neighbors by species (different output structure); NNPOps SchNet CFConv applies subsequent neural network layers (over-inclusive); no pure Gaussian-smearing-only `.cu` found
 - `22_SE3InvariantLinear.py` — no standalone PaiNN/EGNN-style SE(3)-invariant linear `.cu`; cuEquivariance has no `.cu` files
