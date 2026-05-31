@@ -15,6 +15,19 @@ import torch
 import torch.nn as nn
 from typing import Any, Optional
 
+
+def _clone_forward_arg_list(inputs: list) -> list:
+    """Tensor-wise clone so repeated forwards do not mutate shared buffers."""
+
+    out: list[Any] = []
+    for x in inputs:
+        if isinstance(x, torch.Tensor):
+            out.append(x.clone())
+        else:
+            out.append(x)
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. GPU Memory Efficiency
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +48,7 @@ def measure_memory(
     baseline_mem = torch.cuda.memory_allocated(device=device)
 
     with torch.no_grad():
-        _ = model(*inputs)
+        _ = model(*_clone_forward_arg_list(inputs))
     torch.cuda.synchronize(device=device)
 
     peak_mem = torch.cuda.max_memory_allocated(device=device)
@@ -81,7 +94,7 @@ def measure_kernel_launches(
 
         with torch.no_grad():
             with _profiler.profile(use_cuda=True) as prof:
-                _ = model(*inputs)
+                _ = model(*_clone_forward_arg_list(inputs))
             torch.cuda.synchronize(device)
 
         events = prof.function_events
@@ -343,7 +356,7 @@ def measure_energy(
 
         for _ in range(3):
             with torch.no_grad():
-                _ = model(*inputs)
+                _ = model(*_clone_forward_arg_list(inputs))
         torch.cuda.synchronize(device=device)
 
         energy_before = pynvml.nvmlDeviceGetTotalEnergyConsumption(handle)
@@ -352,7 +365,7 @@ def measure_energy(
 
         with torch.no_grad():
             for _ in range(num_trials):
-                _ = model(*inputs)
+                _ = model(*_clone_forward_arg_list(inputs))
         torch.cuda.synchronize(device=device)
 
         t_end = time.perf_counter()

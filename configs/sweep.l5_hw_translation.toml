@@ -31,6 +31,8 @@ max_turns               = 10
 max_tool_calls          = 30
 warn_turns_remaining    = 2
 reasoning_effort        = "medium"
+# When dynamic_eval_timeout is true: skip torchrun reference probe; use ceiling (see 8xh100_default.toml).
+reference_probe_enabled = false
 
 [parallelism]
 num_gpu_devices         = 8

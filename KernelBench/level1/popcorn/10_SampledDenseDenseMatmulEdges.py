@@ -33,11 +33,19 @@ feat_dim = 128
 
 
 def get_inputs():
-    src_idx = torch.randint(0, num_src_nodes, (num_edges,), dtype=torch.int32)
-    dst_idx = torch.randint(0, num_dst_nodes, (num_edges,), dtype=torch.int32)
-    src_feat = torch.randn(num_src_nodes, feat_dim, dtype=torch.float32)
-    dst_feat = torch.randn(num_dst_nodes, feat_dim, dtype=torch.float32)
+    p = popcorn_pri
+    n_edges = p.jitter_int(num_edges)
+    fd = p.jitter_int(feat_dim, align=8)
+    ns = p.jitter_int(num_src_nodes)
+    nd = p.jitter_int(num_dst_nodes)
+    src_idx = torch.randint(0, ns, (n_edges,), dtype=torch.int32)
+    dst_idx = torch.randint(0, nd, (n_edges,), dtype=torch.int32)
+    src_feat = torch.randn(ns, fd, dtype=torch.float32)
+    dst_feat = torch.randn(nd, fd, dtype=torch.float32)
     return [src_idx, dst_idx, src_feat, dst_feat]
+
+
+
 
 
 def get_init_inputs():

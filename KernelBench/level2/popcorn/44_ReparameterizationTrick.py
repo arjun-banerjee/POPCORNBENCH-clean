@@ -58,8 +58,9 @@ batch_size = 256
 
 
 def get_inputs():
-    mu = torch.randn(batch_size, num_components, latent_dim)
-    log_var = torch.randn(batch_size, num_components, latent_dim) * 0.5
+    p = popcorn_pri
+    mu = torch.randn(p.jitter_int(batch_size), num_components, latent_dim)
+    log_var = torch.randn(p.jitter_int(batch_size), num_components, latent_dim) * 0.5
     return [mu, log_var]
 
 

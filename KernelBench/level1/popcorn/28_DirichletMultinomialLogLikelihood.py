@@ -41,7 +41,8 @@ batch_size = 512
 
 
 def get_inputs():
-    counts = torch.randint(0, 10, (batch_size, vocab_size)).float()
+    bs = popcorn_pri.jitter_int(batch_size)
+    counts = torch.randint(0, 10, (bs, vocab_size)).float()
     return [counts]
 
 

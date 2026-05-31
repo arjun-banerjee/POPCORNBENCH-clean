@@ -89,9 +89,10 @@ radius = 0.12
 
 
 def get_inputs():
-    points = torch.randn(batch_size, num_points, 3)
-    queries = torch.randn(batch_size, num_queries, 3)
-    features = torch.randn(batch_size, num_points, in_channels)
+    p = popcorn_pri
+    points = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_points), 3)
+    queries = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_queries), 3)
+    features = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_points), in_channels)
     return [points, queries, features]
 
 

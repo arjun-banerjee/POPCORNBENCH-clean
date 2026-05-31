@@ -22,9 +22,12 @@ image_size = 224
 
 
 def get_inputs():
-    input_ids = torch.randint(0, vocab_size, (batch_size, sequence_length))
-    pixel_values = torch.randn(batch_size, 3, image_size, image_size)
-    return [input_ids, pixel_values]
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    sl = p.jitter_int(sequence_length)
+    inputs = torch.randint(0, vocab_size, (bs, sl))
+    return [inputs]
+
 
 
 def get_init_inputs():

@@ -1,0 +1,205 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{3}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Experimental Sets}{3}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Label Fix Summary}{4}{section.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Timeout-Recovery Relabeled Entries\relax }}{4}{table.caption.2}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:label_fix}{{1}{4}{Timeout-Recovery Relabeled Entries\relax }{table.caption.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Pareto Frontier Analysis}{5}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Pareto Pair P1: Compute \% vs DRAM Utilization}{5}{subsection.3.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Compute utilization vs. DRAM utilization across L1/L2/L3 levels and modes. Points in the upper-right corner indicate balanced hardware utilization.\relax }}{5}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:pareto_set1_P1}{{1}{5}{Compute utilization vs. DRAM utilization across L1/L2/L3 levels and modes. Points in the upper-right corner indicate balanced hardware utilization.\relax }{figure.caption.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Compute vs. DRAM utilization for Level-5 hardware-translation tasks. Models closer to the upper-right are better utilizing both compute and memory bandwidth.\relax }}{6}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:pareto_set2_P1}{{2}{6}{Compute vs. DRAM utilization for Level-5 hardware-translation tasks. Models closer to the upper-right are better utilizing both compute and memory bandwidth.\relax }{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Compute vs. DRAM for 8$\times $H100 tasks. The re-evaluated sl5 folder (top panel) may show fewer data points due to timeout-induced missing profiles.\relax }}{7}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:pareto_set3_P1}{{3}{7}{Compute vs. DRAM for 8$\times $H100 tasks. The re-evaluated sl5 folder (top panel) may show fewer data points due to timeout-induced missing profiles.\relax }{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Pareto Pair P2: SOL Score vs Speedup/Reference}{8}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces SOL score vs. speedup. High SOL score with high speedup indicates kernels that are simultaneously close to hardware limits and faster than the reference.\relax }}{8}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:pareto_set1_P2}{{4}{8}{SOL score vs. speedup. High SOL score with high speedup indicates kernels that are simultaneously close to hardware limits and faster than the reference.\relax }{figure.caption.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces SOL score vs. speedup for Level-5 hardware translation. Models achieving high SOL at moderate speedup may be bandwidth-limited.\relax }}{9}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:pareto_set2_P2}{{5}{9}{SOL score vs. speedup for Level-5 hardware translation. Models achieving high SOL at moderate speedup may be bandwidth-limited.\relax }{figure.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces SOL vs. speedup for 8$\times $H100. Kernels exploiting multi-GPU collectives may show distinct frontier shapes.\relax }}{10}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:pareto_set3_P2}{{6}{10}{SOL vs. speedup for 8$\times $H100. Kernels exploiting multi-GPU collectives may show distinct frontier shapes.\relax }{figure.caption.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Pareto Pair P3: Power (W) vs Energy (mJ)}{11}{subsection.3.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Power (W) vs. energy (mJ). Lower-left is ideal. High-power kernels that complete quickly can still have low total energy.\relax }}{11}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:pareto_set1_P3}{{7}{11}{Power (W) vs. energy (mJ). Lower-left is ideal. High-power kernels that complete quickly can still have low total energy.\relax }{figure.caption.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Power vs. energy for Level-5 tasks. Hardware-translation kernels targeting 8$\times $H100 show higher power draw.\relax }}{12}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:pareto_set2_P3}{{8}{12}{Power vs. energy for Level-5 tasks. Hardware-translation kernels targeting 8$\times $H100 show higher power draw.\relax }{figure.caption.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Power vs. energy on 8$\times $H100. The multi-GPU setup draws significantly more power than single-GPU experiments.\relax }}{13}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:pareto_set3_P3}{{9}{13}{Power vs. energy on 8$\times $H100. The multi-GPU setup draws significantly more power than single-GPU experiments.\relax }{figure.caption.11}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Pareto Pair P4: Fusion vs Occupancy}{14}{subsection.3.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Fusion ratio vs. occupancy. High fusion with high occupancy is ideal. The frontier reveals which kernels fuse more work without sacrificing thread occupancy.\relax }}{14}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:pareto_set1_P4}{{10}{14}{Fusion ratio vs. occupancy. High fusion with high occupancy is ideal. The frontier reveals which kernels fuse more work without sacrificing thread occupancy.\relax }{figure.caption.12}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces Fusion vs. occupancy for Level-5 translation tasks.\relax }}{15}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:pareto_set2_P4}{{11}{15}{Fusion vs. occupancy for Level-5 translation tasks.\relax }{figure.caption.13}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces Fusion vs. occupancy on 8$\times $H100.\relax }}{16}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:pareto_set3_P4}{{12}{16}{Fusion vs. occupancy on 8$\times $H100.\relax }{figure.caption.14}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Pareto Pair P5: DRAM Utilization vs Speedup}{17}{subsection.3.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces DRAM utilization vs. speedup. Models in the upper-right achieve high speedup while also saturating memory bandwidth.\relax }}{17}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:pareto_set1_P5}{{13}{17}{DRAM utilization vs. speedup. Models in the upper-right achieve high speedup while also saturating memory bandwidth.\relax }{figure.caption.15}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {14}{\ignorespaces DRAM utilization vs. speedup for Level-5 tasks.\relax }}{18}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:pareto_set2_P5}{{14}{18}{DRAM utilization vs. speedup for Level-5 tasks.\relax }{figure.caption.16}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {15}{\ignorespaces DRAM utilization vs. speedup on 8$\times $H100.\relax }}{19}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:pareto_set3_P5}{{15}{19}{DRAM utilization vs. speedup on 8$\times $H100.\relax }{figure.caption.17}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}General Performance Analysis}{20}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Set\nobreakspace  {}1 General Plots}{20}{subsection.4.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {16}{\ignorespaces set1 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }}{21}{figure.caption.18}\protected@file@percent }
+\newlabel{fig:gen_set1_G1}{{16}{21}{set1 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }{figure.caption.18}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {17}{\ignorespaces set1 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }}{22}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:gen_set1_G2}{{17}{22}{set1 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }{figure.caption.19}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {18}{\ignorespaces set1 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }}{22}{figure.caption.20}\protected@file@percent }
+\newlabel{fig:gen_set1_G3}{{18}{22}{set1 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }{figure.caption.20}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {19}{\ignorespaces set1 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }}{23}{figure.caption.21}\protected@file@percent }
+\newlabel{fig:gen_set1_G5}{{19}{23}{set1 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }{figure.caption.21}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {20}{\ignorespaces set1 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }}{24}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:gen_set1_G6}{{20}{24}{set1 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }{figure.caption.22}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {21}{\ignorespaces set1 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }}{25}{figure.caption.23}\protected@file@percent }
+\newlabel{fig:gen_set1_G7}{{21}{25}{set1 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }{figure.caption.23}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Set\nobreakspace  {}2 General Plots}{26}{subsection.4.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {22}{\ignorespaces set2 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }}{27}{figure.caption.24}\protected@file@percent }
+\newlabel{fig:gen_set2_G1}{{22}{27}{set2 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }{figure.caption.24}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {23}{\ignorespaces set2 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }}{28}{figure.caption.25}\protected@file@percent }
+\newlabel{fig:gen_set2_G2}{{23}{28}{set2 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }{figure.caption.25}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {24}{\ignorespaces set2 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }}{28}{figure.caption.26}\protected@file@percent }
+\newlabel{fig:gen_set2_G3}{{24}{28}{set2 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }{figure.caption.26}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {25}{\ignorespaces set2 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }}{29}{figure.caption.27}\protected@file@percent }
+\newlabel{fig:gen_set2_G5}{{25}{29}{set2 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }{figure.caption.27}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {26}{\ignorespaces set2 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }}{30}{figure.caption.28}\protected@file@percent }
+\newlabel{fig:gen_set2_G6}{{26}{30}{set2 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }{figure.caption.28}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {27}{\ignorespaces set2 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }}{31}{figure.caption.29}\protected@file@percent }
+\newlabel{fig:gen_set2_G7}{{27}{31}{set2 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }{figure.caption.29}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Set\nobreakspace  {}3 General Plots}{32}{subsection.4.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {28}{\ignorespaces set3 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }}{33}{figure.caption.30}\protected@file@percent }
+\newlabel{fig:gen_set3_G1}{{28}{33}{set3 Speedup distribution per model, faceted by task (problem). Boxes show median and IQR; outliers indicate tasks where one model achieves unusually high speedup.\relax }{figure.caption.30}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {29}{\ignorespaces set3 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }}{34}{figure.caption.31}\protected@file@percent }
+\newlabel{fig:gen_set3_G2}{{29}{34}{set3 Number of correct kernel submissions per model, grouped by task. Directly shows which model × task combinations succeed most often.\relax }{figure.caption.31}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {30}{\ignorespaces set3 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }}{34}{figure.caption.32}\protected@file@percent }
+\newlabel{fig:gen_set3_G3}{{30}{34}{set3 Correctness rate (\%) per model, grouped by task. Normalizes by number of attempts to allow fair comparison across models.\relax }{figure.caption.32}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {31}{\ignorespaces set3 Original vs. timeout-recovered correctness rate per model (Set\nobreakspace  {}3 FIXED only). The orange bar shows additional correct entries recovered by the label-fix procedure.\relax }}{35}{figure.caption.33}\protected@file@percent }
+\newlabel{fig:gen_set3_G4}{{31}{35}{set3 Original vs. timeout-recovered correctness rate per model (Set~3 FIXED only). The orange bar shows additional correct entries recovered by the label-fix procedure.\relax }{figure.caption.33}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {32}{\ignorespaces set3 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }}{36}{figure.caption.34}\protected@file@percent }
+\newlabel{fig:gen_set3_G5}{{32}{36}{set3 SOL score distribution (violin) per model, one panel per task. Wider violins indicate more variance; the median line shows typical hardware efficiency.\relax }{figure.caption.34}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {33}{\ignorespaces set3 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }}{37}{figure.caption.35}\protected@file@percent }
+\newlabel{fig:gen_set3_G6}{{33}{37}{set3 DRAM utilization vs. speedup scatter per task, colored by model. Reveals whether higher speedup comes with proportionally higher memory bandwidth usage.\relax }{figure.caption.35}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {34}{\ignorespaces set3 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }}{38}{figure.caption.36}\protected@file@percent }
+\newlabel{fig:gen_set3_G7}{{34}{38}{set3 Energy (mJ) vs. power (W) scatter per task, colored by model. Low-energy, moderate-power kernels in the lower-left are most efficient.\relax }{figure.caption.36}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Combined Overview Plots}{39}{section.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {35}{\ignorespaces Overall correctness rate per model (all tasks pooled). Each point is a model's pass rate across every problem in that set.\relax }}{39}{figure.caption.37}\protected@file@percent }
+\newlabel{fig:comb_combined_C1_correctness_rate}{{35}{39}{Overall correctness rate per model (all tasks pooled). Each point is a model's pass rate across every problem in that set.\relax }{figure.caption.37}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {36}{\ignorespaces Speedup distribution per model (all tasks pooled). Boxes show median and IQR; individual runs are overlaid as scatter points.\relax }}{39}{figure.caption.38}\protected@file@percent }
+\newlabel{fig:comb_combined_C2_speedup_dist}{{36}{39}{Speedup distribution per model (all tasks pooled). Boxes show median and IQR; individual runs are overlaid as scatter points.\relax }{figure.caption.38}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {37}{\ignorespaces Correctness rate by trajectory mode (single-turn / default / all) per model. Shape varies by mode; color by model.\relax }}{40}{figure.caption.39}\protected@file@percent }
+\newlabel{fig:comb_combined_C3_correctness_by_mode}{{37}{40}{Correctness rate by trajectory mode (single-turn / default / all) per model. Shape varies by mode; color by model.\relax }{figure.caption.39}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {38}{\ignorespaces DRAM utilization vs.\nobreakspace  {}speedup scatter (all tasks pooled). Reveals whether faster kernels also saturate memory bandwidth.\relax }}{40}{figure.caption.40}\protected@file@percent }
+\newlabel{fig:comb_combined_C4_dram_vs_speedup}{{38}{40}{DRAM utilization vs.~speedup scatter (all tasks pooled). Reveals whether faster kernels also saturate memory bandwidth.\relax }{figure.caption.40}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {39}{\ignorespaces Energy (mJ) vs.\nobreakspace  {}power (W) scatter (all tasks pooled). Lower-left corner is most efficient.\relax }}{40}{figure.caption.41}\protected@file@percent }
+\newlabel{fig:comb_combined_C5_energy_vs_power}{{39}{40}{Energy (mJ) vs.~power (W) scatter (all tasks pooled). Lower-left corner is most efficient.\relax }{figure.caption.41}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {40}{\ignorespaces SOL score distribution per model (all tasks pooled). Higher SOL means the kernel is closer to the roofline hardware limit.\relax }}{41}{figure.caption.42}\protected@file@percent }
+\newlabel{fig:comb_combined_C6_sol_score_dist}{{40}{41}{SOL score distribution per model (all tasks pooled). Higher SOL means the kernel is closer to the roofline hardware limit.\relax }{figure.caption.42}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {41}{\ignorespaces Correctness rate for every model × set combination in a single view. Marker shape encodes set; color encodes model.\relax }}{41}{figure.caption.43}\protected@file@percent }
+\newlabel{fig:comb_combined_C7_cross_set_correctness}{{41}{41}{Correctness rate for every model × set combination in a single view. Marker shape encodes set; color encodes model.\relax }{figure.caption.43}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {42}{\ignorespaces Raw count of correct (circle) vs.\nobreakspace  {}incorrect (cross) submissions per model. Lets you see absolute volume differences across models.\relax }}{42}{figure.caption.44}\protected@file@percent }
+\newlabel{fig:comb_combined_C8_correct_vs_incorrect}{{42}{42}{Raw count of correct (circle) vs.~incorrect (cross) submissions per model. Lets you see absolute volume differences across models.\relax }{figure.caption.44}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Exploratory Analysis}{43}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}E1 learning curve by level.png}{43}{subsection.6.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {43}{\ignorespaces Correctness rate by problem level (L1→L2→L3) per model. Reveals how model performance degrades as kernel complexity increases across levels.\relax }}{43}{figure.caption.45}\protected@file@percent }
+\newlabel{fig:ex_1}{{43}{43}{Correctness rate by problem level (L1→L2→L3) per model. Reveals how model performance degrades as kernel complexity increases across levels.\relax }{figure.caption.45}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}E2 efficiency frontier.png}{43}{subsection.6.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {44}{\ignorespaces Scatter of speedup vs. energy (mJ) on log-log axes. Models in the upper-left achieve high speedup at low energy cost, forming the efficiency Pareto frontier.\relax }}{44}{figure.caption.46}\protected@file@percent }
+\newlabel{fig:ex_2}{{44}{44}{Scatter of speedup vs. energy (mJ) on log-log axes. Models in the upper-left achieve high speedup at low energy cost, forming the efficiency Pareto frontier.\relax }{figure.caption.46}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}E3 failure modes.png}{45}{subsection.6.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {45}{\ignorespaces Stacked bar chart of outcome fractions (correct, incorrect, compile\_fail) per model. Reveals whether a model's failures are dominated by compilation errors or correctness mismatches.\relax }}{45}{figure.caption.47}\protected@file@percent }
+\newlabel{fig:ex_3}{{45}{45}{Stacked bar chart of outcome fractions (correct, incorrect, compile\_fail) per model. Reveals whether a model's failures are dominated by compilation errors or correctness mismatches.\relax }{figure.caption.47}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}E4 corr heatmap set1.png}{45}{subsection.6.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {46}{\ignorespaces Pearson correlation of all numeric metrics for Set\nobreakspace  {}1.\relax }}{46}{figure.caption.48}\protected@file@percent }
+\newlabel{fig:ex_4}{{46}{46}{Pearson correlation of all numeric metrics for Set~1.\relax }{figure.caption.48}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}E4 corr heatmap set2.png}{47}{subsection.6.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {47}{\ignorespaces Pearson correlation of all numeric metrics for Set\nobreakspace  {}2.\relax }}{47}{figure.caption.49}\protected@file@percent }
+\newlabel{fig:ex_5}{{47}{47}{Pearson correlation of all numeric metrics for Set~2.\relax }{figure.caption.49}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}E4 corr heatmap set3.png}{47}{subsection.6.6}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {48}{\ignorespaces Pearson correlation of all numeric metrics for Set\nobreakspace  {}3.\relax }}{48}{figure.caption.50}\protected@file@percent }
+\newlabel{fig:ex_6}{{48}{48}{Pearson correlation of all numeric metrics for Set~3.\relax }{figure.caption.50}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.7}E5 model ranking speedup vs correctness.png}{49}{subsection.6.7}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {49}{\ignorespaces One point per model: mean speedup on x-axis, overall correctness rate on y-axis. Provides an at-a-glance model ranking overview.\relax }}{49}{figure.caption.51}\protected@file@percent }
+\newlabel{fig:ex_7}{{49}{49}{One point per model: mean speedup on x-axis, overall correctness rate on y-axis. Provides an at-a-glance model ranking overview.\relax }{figure.caption.51}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.8}E6 metric variance.png}{49}{subsection.6.8}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {50}{\ignorespaces Coefficient of variation (CV) per model per metric. High CV indicates unstable behavior across tasks; low CV indicates consistent performance.\relax }}{50}{figure.caption.52}\protected@file@percent }
+\newlabel{fig:ex_8}{{50}{50}{Coefficient of variation (CV) per model per metric. High CV indicates unstable behavior across tasks; low CV indicates consistent performance.\relax }{figure.caption.52}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.9}E7 parallel coordinates.png}{50}{subsection.6.9}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {51}{\ignorespaces Parallel coordinates of normalized model mean scores across five key metrics. Highlights trade-offs between speedup, SOL score, DRAM utilization, occupancy, and energy.\relax }}{51}{figure.caption.53}\protected@file@percent }
+\newlabel{fig:ex_9}{{51}{51}{Parallel coordinates of normalized model mean scores across five key metrics. Highlights trade-offs between speedup, SOL score, DRAM utilization, occupancy, and energy.\relax }{figure.caption.53}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.10}E8 task difficulty.png}{51}{subsection.6.10}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {52}{\ignorespaces Correctness rate per task (problem) sorted from hardest to easiest. Tasks with near-zero correctness rates represent unsolved problems across all models.\relax }}{51}{figure.caption.54}\protected@file@percent }
+\newlabel{fig:ex_10}{{52}{51}{Correctness rate per task (problem) sorted from hardest to easiest. Tasks with near-zero correctness rates represent unsolved problems across all models.\relax }{figure.caption.54}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.11}E9 step efficiency.png}{51}{subsection.6.11}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {53}{\ignorespaces Distribution of the trajectory step at which correctness first passes, per model. Models that solve problems early use fewer LLM turns and tokens.\relax }}{52}{figure.caption.55}\protected@file@percent }
+\newlabel{fig:ex_11}{{53}{52}{Distribution of the trajectory step at which correctness first passes, per model. Models that solve problems early use fewer LLM turns and tokens.\relax }{figure.caption.55}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.12}E10 radar chart.png}{53}{subsection.6.12}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {54}{\ignorespaces Multi-metric radar chart with one polygon per model. Enables holistic comparison across speedup, SOL score, DRAM util, occupancy, and fusion.\relax }}{53}{figure.caption.56}\protected@file@percent }
+\newlabel{fig:ex_12}{{54}{53}{Multi-metric radar chart with one polygon per model. Enables holistic comparison across speedup, SOL score, DRAM util, occupancy, and fusion.\relax }{figure.caption.56}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.13}E11 energy efficiency ratio.png}{53}{subsection.6.13}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {55}{\ignorespaces Boxplot of speedup-per-mJ (energy efficiency ratio) per model. Models with high median and low variance provide the best energy-normalized performance.\relax }}{54}{figure.caption.57}\protected@file@percent }
+\newlabel{fig:ex_13}{{55}{54}{Boxplot of speedup-per-mJ (energy efficiency ratio) per model. Models with high median and low variance provide the best energy-normalized performance.\relax }{figure.caption.57}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.14}E12 dram saturation.png}{55}{subsection.6.14}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {56}{\ignorespaces DRAM utilization histogram, split by final correctness. High DRAM utilization in correct kernels suggests better memory bandwidth utilization.\relax }}{55}{figure.caption.58}\protected@file@percent }
+\newlabel{fig:ex_14}{{56}{55}{DRAM utilization histogram, split by final correctness. High DRAM utilization in correct kernels suggests better memory bandwidth utilization.\relax }{figure.caption.58}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.15}E13 pareto dominance heatmap.png}{55}{subsection.6.15}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {57}{\ignorespaces Heatmap of Pareto pair data coverage per task × model. Cells show how many of the 5 Pareto pairs have valid data for that model–task combination.\relax }}{56}{figure.caption.59}\protected@file@percent }
+\newlabel{fig:ex_15}{{57}{56}{Heatmap of Pareto pair data coverage per task × model. Cells show how many of the 5 Pareto pairs have valid data for that model–task combination.\relax }{figure.caption.59}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.16}E14 cross set correctness.png}{57}{subsection.6.16}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {58}{\ignorespaces Side-by-side correctness rate per model across Set\nobreakspace  {}1, Set\nobreakspace  {}2, and Set\nobreakspace  {}3. Reveals which models generalize across hardware configurations and problem types.\relax }}{57}{figure.caption.60}\protected@file@percent }
+\newlabel{fig:ex_16}{{58}{57}{Side-by-side correctness rate per model across Set~1, Set~2, and Set~3. Reveals which models generalize across hardware configurations and problem types.\relax }{figure.caption.60}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.17}E15 timeout impact timeline.png}{57}{subsection.6.17}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {59}{\ignorespaces Scatter of total trajectory turns vs. speedup for Set\nobreakspace  {}3 sl5 runs, colored by whether the result was timeout-recovered. Timeout-recovered entries tend to cluster at maximum turns.\relax }}{58}{figure.caption.61}\protected@file@percent }
+\newlabel{fig:ex_17}{{59}{58}{Scatter of total trajectory turns vs. speedup for Set~3 sl5 runs, colored by whether the result was timeout-recovered. Timeout-recovered entries tend to cluster at maximum turns.\relax }{figure.caption.61}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.18}E16 occupancy vs fusion.png}{59}{subsection.6.18}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {60}{\ignorespaces Scatter of occupancy vs. fusion ratio colored by correctness. High fusion with moderate occupancy may predict correctness better than either alone.\relax }}{59}{figure.caption.62}\protected@file@percent }
+\newlabel{fig:ex_18}{{60}{59}{Scatter of occupancy vs. fusion ratio colored by correctness. High fusion with moderate occupancy may predict correctness better than either alone.\relax }{figure.caption.62}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.19}E17 sol score cdf.png}{59}{subsection.6.19}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {61}{\ignorespaces CDF of SOL scores per model, one panel per set. Models with CDF shifted right (higher SOL) are closer to hardware performance limits.\relax }}{60}{figure.caption.63}\protected@file@percent }
+\newlabel{fig:ex_19}{{61}{60}{CDF of SOL scores per model, one panel per set. Models with CDF shifted right (higher SOL) are closer to hardware performance limits.\relax }{figure.caption.63}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.20}E18 set2 speedup by mode.png}{60}{subsection.6.20}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {62}{\ignorespaces Set\nobreakspace  {}2 speedup distribution across multi-turn modes (default, all, single-turn) per model. Reveals whether additional context in multi-turn modes improves kernel performance.\relax }}{61}{figure.caption.64}\protected@file@percent }
+\newlabel{fig:ex_20}{{62}{61}{Set~2 speedup distribution across multi-turn modes (default, all, single-turn) per model. Reveals whether additional context in multi-turn modes improves kernel performance.\relax }{figure.caption.64}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.21}E19 level mode heatmap fw-glm-5-1.png}{62}{subsection.6.21}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {63}{\ignorespaces Correctness rate heatmap for \texttt  {fw-glm-5-1} across levels (rows) and modes (cols) in Set\nobreakspace  {}1.\relax }}{62}{figure.caption.65}\protected@file@percent }
+\newlabel{fig:ex_21}{{63}{62}{Correctness rate heatmap for \texttt {fw-glm-5-1} across levels (rows) and modes (cols) in Set~1.\relax }{figure.caption.65}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.22}E19 level mode heatmap gpt-5.5-priority.png}{62}{subsection.6.22}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {64}{\ignorespaces Correctness rate heatmap for \texttt  {gpt-5.5-priority} across levels (rows) and modes (cols) in Set\nobreakspace  {}1.\relax }}{63}{figure.caption.66}\protected@file@percent }
+\newlabel{fig:ex_22}{{64}{63}{Correctness rate heatmap for \texttt {gpt-5.5-priority} across levels (rows) and modes (cols) in Set~1.\relax }{figure.caption.66}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.23}E19 level mode heatmap grok-4.3.png}{64}{subsection.6.23}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {65}{\ignorespaces Correctness rate heatmap for \texttt  {grok-4.3} across levels (rows) and modes (cols) in Set\nobreakspace  {}1.\relax }}{64}{figure.caption.67}\protected@file@percent }
+\newlabel{fig:ex_23}{{65}{64}{Correctness rate heatmap for \texttt {grok-4.3} across levels (rows) and modes (cols) in Set~1.\relax }{figure.caption.67}{}}
+\gdef \LT@i {\LT@entry 
+    {5}{182.11147pt}\LT@entry 
+    {5}{29.27782pt}\LT@entry 
+    {5}{27.00006pt}\LT@entry 
+    {1}{64.8612pt}\LT@entry 
+    {1}{73.25012pt}\LT@entry 
+    {1}{59.9723pt}\LT@entry 
+    {1}{0.0pt}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Trace Analysis}{65}{section.7}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Trace Analysis Summary per Model and Set\relax }}{65}{table.2}\protected@file@percent }
+\newlabel{tab:trace}{{2}{65}{Trace Analysis Summary per Model and Set\relax }{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Trajectory Patterns}{65}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Conclusion}{66}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Top Findings}{66}{subsection.8.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Limitations}{66}{subsection.8.2}\protected@file@percent }
+\gdef \@abspage@last{66}

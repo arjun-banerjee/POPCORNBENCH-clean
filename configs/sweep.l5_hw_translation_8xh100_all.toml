@@ -15,18 +15,19 @@
 #           scripts/run_l5_hw_translation_8xh100_sweeps.sh
 
 [run]
-name                    = "fl5_hw_translation_8xh100_all_gpt"
+name                    = "sl5_hw_translation_8xh100_all_gpt"
 dataset_src             = "local"
 variants                = ["hardware_translation_stub"]
 levels                  = [5]
 # Problems 29 & 30 have no kernels/8xa100/<stem>.cu source; omit to avoid prompt-build failures.
-problem_subset          = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 22, 23, 25, 26, 27, 28]
+problem_subset          = [1, 2, 3, 4, 5, 7, 8, 9, 10, 22, 23, 25, 26, 27, 28]
 backend                 = "cuda"
 precision               = "fp16"
 gpu_arch                = ["Hopper"]
 timing_method           = "cuda_event"
-num_correct_trials      = 5
-num_perf_trials         = 50
+num_correct_trials       = 1   # run_correctness only
+submit_num_correct_trials = 3  # submit_kernel correctness only
+num_perf_trials         = 5
 tools                   = "all"
 
 # Hardware translation: 8xA100 .cu in prompt; I/O from TOML; oracle Python in hardware_translation/oracle/.
@@ -42,6 +43,9 @@ hardware_translation_io_dir      = "KernelBench/level5/hardware_translation/io"
 hardware_translation_oracle_dir  = "KernelBench/level5/hardware_translation/oracle"
 
 [agent]
+verbose                 = true
+# Live-stream torchrun stdout/stderr during multi-GPU eval (trial logs); ranks interleave.
+stream_torchrun_stdout  = true
 max_turns               = 15
 max_tool_calls          = 30
 warn_turns_remaining    = 3
@@ -55,7 +59,9 @@ chat_context_tail_messages = 96
 distributed_torchrun_world_size = 8
 # Multi-rank torchrun eval timeout (s). profile_kernel uses its own internal
 # 1800s timeout (ProfileKernelTool._MULTI_RANK_TIMEOUT_S).
-eval_torchrun_timeout_s = 5400
+eval_torchrun_timeout_s = 300
+# When dynamic_eval_timeout is true: skip torchrun reference probe; use ceiling (see 8xh100_default.toml).
+reference_probe_enabled = false
 
 [parallelism]
 # Comm-sweep style: one work item at a time owns all 8 GPUs.
@@ -65,10 +71,11 @@ agents_per_gpu          = 1
 use_eval_queue          = false
 perf_lock_per_gpu       = false
 # tools=all adds profile_kernel (1800s per call) on top of submit/correctness
-# (~5400s each). 15-turn budget can chain many heavy calls — leave a generous
-# wall budget. With use_eval_queue=false there is no eval RPC, so the SIGALRM /
-# queue corruption concern from the 1xH100 `all` config does NOT apply here.
-worker_timeout_s        = 21600
+# (~300s torchrun cap each). 15-turn budget can chain many heavy calls — keep
+# worker_timeout_s >> eval_torchrun_timeout_s × typical turns. With
+# use_eval_queue=false there is no eval RPC, so the SIGALRM / queue corruption
+# concern from the 1xH100 `all` config does NOT apply here.
+worker_timeout_s        = 43200
 llm_global_concurrency  = 0
 
 [report]

@@ -107,8 +107,12 @@ batch_size = 2
 
 
 def get_inputs():
-    msa = torch.randn(batch_size, msa_depth, seq_len, msa_dim)
-    pair = torch.randn(batch_size, seq_len, seq_len, pair_dim)
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    sd = p.jitter_int(msa_depth)
+    sl = p.jitter_int(seq_len)
+    msa = torch.randn(bs, sd, sl, msa_dim)
+    pair = torch.randn(bs, sl, sl, pair_dim)
     return [msa, pair]
 
 

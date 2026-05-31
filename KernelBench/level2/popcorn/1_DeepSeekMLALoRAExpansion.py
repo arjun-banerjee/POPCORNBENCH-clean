@@ -43,10 +43,11 @@ head_dim = 32
 
 
 def get_inputs():
-    hidden = torch.randn(batch_size, seq_len, model_dim, dtype=torch.float32)
-    w_down = torch.randn(model_dim, rank, dtype=torch.float32)
-    w_up_k = torch.randn(rank, kv_heads * head_dim, dtype=torch.float32)
-    w_up_v = torch.randn(rank, kv_heads * head_dim, dtype=torch.float32)
+    p = popcorn_pri
+    hidden = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(model_dim, align=8), dtype=torch.float32)
+    w_down = torch.randn(p.jitter_int(model_dim, align=8), rank, dtype=torch.float32)
+    w_up_k = torch.randn(rank, p.jitter_int(kv_heads) * p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    w_up_v = torch.randn(rank, p.jitter_int(kv_heads) * p.jitter_int(head_dim, align=8), dtype=torch.float32)
     return [hidden, w_down, w_up_k, w_up_v]
 
 

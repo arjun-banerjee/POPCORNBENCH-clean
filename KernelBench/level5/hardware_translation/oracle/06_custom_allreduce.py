@@ -24,8 +24,9 @@ class Model(nn.Module):
         maybe_init_process_group()
         if not is_distributed_run():
             return x
-        dist.all_reduce(x, op=dist.ReduceOp.SUM)
-        return x / get_world_size()
+        y = x.clone()
+        dist.all_reduce(y, op=dist.ReduceOp.SUM)
+        return y / get_world_size()
 
 
 def get_inputs():

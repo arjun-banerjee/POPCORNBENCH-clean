@@ -128,9 +128,10 @@ batch_size = 16
 
 
 def get_inputs():
-    robot_min = torch.empty(batch_size, 2).uniform_(-1.0, 0.5)
-    robot_max = robot_min + torch.empty(batch_size, 2).uniform_(0.2, 0.8)
-    env_triangle = torch.empty(batch_size, 3, 2).uniform_(-0.8, 0.8)
+    bs = popcorn_pri.jitter_int(batch_size)
+    robot_min = torch.empty(bs, 2).uniform_(-1.0, 0.5)
+    robot_max = robot_min + torch.empty(bs, 2).uniform_(0.2, 0.8)
+    env_triangle = torch.empty(bs, 3, 2).uniform_(-0.8, 0.8)
     return [robot_min, robot_max, env_triangle]
 
 

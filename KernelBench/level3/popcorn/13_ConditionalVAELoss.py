@@ -61,9 +61,10 @@ batch_size = 128
 
 
 def get_inputs():
-    x = torch.randn(batch_size, input_dim)
-    y = torch.zeros(batch_size, label_dim)
-    y.scatter_(1, torch.randint(0, label_dim, (batch_size, 1)), 1.0)
+    p = popcorn_pri
+    x = torch.randn(p.jitter_int(batch_size), input_dim)
+    y = torch.zeros(p.jitter_int(batch_size), label_dim)
+    y.scatter_(1, torch.randint(0, label_dim, (p.jitter_int(batch_size), 1)), 1.0)
     return [x, y]
 
 

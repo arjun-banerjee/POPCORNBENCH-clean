@@ -1,0 +1,257 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PopcornBench: Expanding the universe of LLM-generated kernels.</title><meta property="og:title" content="PopcornBench: Expanding the universe of LLM-generated kernels."><meta property="og:description" content="We stress-tested frontier models on GPU kernel engineering across a wide range of domains and tasks."><meta property="og:type" content="article"><meta property="og:url" content="https://arjun-banerjee.github.io/POPCORNBENCH/blog.html"><link rel="stylesheet" href="https://use.typekit.net/bsk0vur.css"><style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff; --fg:#1a1a1a; --pri:#901010; --acc:#ab1313;
+  --soft:#f8de8d; --soft08:rgba(248,222,141,.4); --pri15:rgba(144,16,16,.15);
+  --pri08:rgba(144,16,16,.08); --pri35:rgba(144,16,16,.35); --t:80ms ease;
+}
+html,body{background:var(--bg);color:var(--fg);
+  font-family:"calling-code",ui-monospace,Menlo,monospace;font-size:15px;line-height:1.6}
+a{color:var(--acc);text-decoration:none}
+a:hover{opacity:.65}
+header{border-bottom:1px solid var(--pri);padding-bottom:0;background:var(--bg)}
+header .wrap{padding:48px 24px 28px}
+h1{font-family:"neue-kabel",sans-serif;font-weight:900;font-style:normal;font-size:64px;
+  letter-spacing:-.025em;color:var(--pri);line-height:.95;margin-bottom:10px}
+.sub{font-family:"calling-code",sans-serif;font-style:italic;font-size:14px;
+  color:var(--pri);opacity:.55;margin-top:4px}
+.wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+nav.topnav{display:flex;gap:16px;margin-top:14px;font-size:13px;font-style:italic}
+nav.topnav a{color:var(--pri);opacity:.55;border-bottom:1px solid transparent;padding-bottom:1px}
+nav.topnav a:hover{opacity:1}
+nav.topnav a.current{opacity:1;border-bottom:2px solid var(--pri);font-style:normal;font-weight:600}
+code{background:var(--soft08);padding:1px 5px;border-radius:3px;font-size:13px;color:var(--pri)}
+.blog-main{max-width:780px;margin:0 auto;padding:48px 24px 96px}
+.blog-main p{line-height:1.75;margin:14px 0;font-size:15px}
+.blog-main ul{margin:14px 0 14px 22px}
+.blog-main ul li{margin:6px 0;line-height:1.65}
+.blog-title{font-family:"neue-kabel",sans-serif;font-weight:900;font-size:48px;
+  color:var(--pri);line-height:1.05;letter-spacing:-.025em;margin-bottom:16px}
+.blog-subtitle{font-size:17px;line-height:1.65;color:var(--fg);opacity:.8;
+  margin-bottom:18px;max-width:680px}
+.hero-meta{font-size:13px;opacity:.55;margin:6px 0 24px;font-style:italic}
+.hero-links{display:flex;gap:16px;flex-wrap:wrap;margin:20px 0 48px}
+.hero-links a{color:var(--acc);border-bottom:1px solid var(--pri15);padding-bottom:2px;font-size:14px}
+.blog-main h2{font-family:"neue-kabel",sans-serif;font-weight:900;font-size:30px;
+  color:var(--pri);margin:56px 0 16px;letter-spacing:-.02em;
+  border-left:4px solid var(--pri);padding-left:14px;line-height:1.15}
+.blog-main h3{font-family:"neue-kabel",sans-serif;font-weight:700;font-size:20px;
+  color:var(--pri);margin:36px 0 12px;letter-spacing:-.01em}
+.blog-figure{margin:36px 0}
+.blog-figure img{width:100%;height:auto;display:block;border:1px solid var(--pri15)}
+.blog-figure figcaption{font-size:13px;opacity:.6;margin-top:10px;line-height:1.55;font-style:italic}
+.stat-block{display:flex;gap:16px;flex-wrap:wrap;margin:28px 0}
+.stat{background:var(--pri08);border-left:3px solid var(--pri);
+  padding:18px 22px;flex:1 1 150px;border-radius:2px}
+.stat-num{font-family:"neue-kabel",sans-serif;font-weight:900;font-size:38px;
+  color:var(--pri);line-height:1}
+.stat-label{font-size:12px;opacity:.65;margin-top:6px;line-height:1.4}
+.callout-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:14px;margin:28px 0}
+.callout{background:var(--soft08);border-left:3px solid var(--pri);
+  padding:16px 18px;border-radius:3px}
+.callout strong{color:var(--pri);display:block;margin-bottom:6px;font-size:14px}
+.callout p{margin:0;font-size:13.5px;line-height:1.6;opacity:.85}
+.harness-table{width:100%;border-collapse:collapse;margin:20px 0;font-size:13.5px}
+.harness-table th,.harness-table td{padding:9px 12px;
+  border-bottom:1px solid var(--pri15);text-align:left;vertical-align:top}
+.harness-table th{color:var(--pri);font-weight:600;background:var(--pri08)}
+.harness-table tr:last-child td{border-bottom:none}
+.task-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}
+.task-card{border:1px solid var(--pri15);padding:18px 20px;border-radius:3px;
+  background:var(--soft08)}
+.task-card h4{font-family:"neue-kabel",sans-serif;font-weight:700;font-size:17px;
+  color:var(--pri);margin-bottom:10px}
+.task-card p{font-size:13.5px;margin:0;line-height:1.6}
+@media(max-width:600px){
+  .blog-title{font-size:34px}
+  .stat-block{flex-direction:column}
+  .callout-grid{grid-template-columns:1fr}
+  .task-split{grid-template-columns:1fr}
+  .stat-num{font-size:30px}
+}
+</style></head>
+<body>
+<header><div class="wrap">
+  <h1>PopcornBench</h1>
+  <div class="sub">multi-model kernel-benchmark harness</div>
+  <nav class="topnav">
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/index.html">Home</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/experiments.html">Experiments</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/docs.html">Docs</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/prompts.html">Prompts</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/blog.html" class="current">Blog</a>
+  </nav>
+</div></header>
+
+<div class="blog-main">
+
+  <h2 class="blog-title" style="border:none;padding:0;margin-top:48px">Expanding the universe of LLM-generated kernels.</h2>
+  <p class="blog-subtitle">We stress-tested frontier models on GPU kernel engineering across a wide range of domains and tasks.</p>
+  <p class="hero-meta">Arjun Banerjee, Tejas Prabhune, Aakarsh Vermani, Arnav Dalal, Chloe Chia, Jathin Korrapati, Youngmin Park &nbsp;&middot;&nbsp; UC Berkeley &nbsp;&middot;&nbsp; May 2026</p>
+  <div class="hero-links">
+    <a href="https://github.com/arjun-banerjee/POPCORNBENCH">GitHub</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/experiments.html">Experiments Dashboard</a>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat">
+      <div class="stat-num">94</div>
+      <div class="stat-label">problems across 4 scientific domains: graph learning, comp bio, robotics, probability/statistics</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">15&#8211;16</div>
+      <div class="stat-label">production kernels translated A100&#8594;H100, single and multi-GPU</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">32.4%</div>
+      <div class="stat-label">best subdomain solve rate (MT-Default); tensor cores essentially unused (&lt;5%)</div>
+    </div>
+  </div>
+
+  <h2>The Problem: Why Another Kernel Benchmark?</h2>
+
+  <p>Existing kernel benchmarks cover the operators you find in a standard deep learning stack: matrix multiplications, attention variants, normalization layers. That is a reasonable starting point, but production GPU workloads increasingly span domains that do not look like training loops -- sparse graph learning, molecular simulation (Evoformer blocks, sequence alignment), robotics dynamics, probabilistic inference. None of these appear in existing benchmarks. PopcornBench fills that gap with 94 problems across four non-standard scientific subdomains.</p>
+
+  <p>The second gap: no prior benchmark tests whether a model can take a production kernel written for one GPU architecture and translate it to a newer one. H100 introduces <code>wgmma</code>, TMA, and the SM90 memory hierarchy, primitives absent from A100 code. A model that can write a kernel from scratch may not know how to port an existing one. PopcornBench&#39;s hardware translation track covers 15&#8211;16 production kernels (single-GPU and multi-GPU) ported from A100 to H100.</p>
+
+  <p>We also address reward hacking -- a known problem (Lange et al. 2025) -- by baking stress testing into the evaluation loop rather than applying it post-hoc. When evaluation parameters are fixed and disclosed in the prompt, a model can hardcode those constants and produce kernels that look correct on the disclosed inputs but fail on any other input shape. PopcornBench reruns submitted kernels on randomized input shapes; contaminated numbers have nowhere to hide.</p>
+
+  <h2>What PopcornBench Covers</h2>
+
+  <div class="task-split">
+    <div class="task-card">
+      <h4>Subdomain Generation (Levels 1-3)</h4>
+      <p>94 problems spanning graph learning, computational biology, robotics, and probability/statistics. Ranges from CSR SpMV and Smith-Waterman alignment to Gibbs sampling, GJK collision detection, flow-matching ODE solvers, and full Evoformer blocks. Curated Popcorn2 subset: 34 problems with communication-collective problems removed.</p>
+    </div>
+    <div class="task-card">
+      <h4>Hardware Translation (Level 5)</h4>
+      <p>15-16 production kernels from vLLM, FlashAttention-2, Marlin, and CUTLASS. Two tracks: single-GPU (A100 to H100) and multi-GPU (8xA100 to 8xH100).</p>
+    </div>
+  </div>
+
+  <p>Three agent harnesses control what tools the model can use during a run:</p>
+
+  <table class="harness-table">
+    <thead><tr><th>Harness</th><th>Tools available</th><th>Max turns</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Single Turn (ST)</strong></td><td>Submit kernel only</td><td>1</td></tr>
+      <tr><td><strong>Default (MT-Default)</strong></td><td>Compile, correctness check, specs, static analysis, submit</td><td>Multi</td></tr>
+      <tr><td><strong>All Tools (MT-All)</strong></td><td>Default + profiling (<code>ncu</code>), disassembly, roofline (ERT)</td><td>Multi</td></tr>
+    </tbody>
+  </table>
+
+  <p>The profiling tools in MT-All expose hardware counters: DRAM utilization, compute utilization, speed-of-light (SOL), warp stall breakdown. The idea was that richer feedback leads to better kernels. Results vary by task type.</p>
+
+  <h2>Subdomain Generation Results</h2>
+
+  <p>PopcornBench is the first benchmark to evaluate LLM kernel generation across scientific computing domains outside the standard deep learning stack. The 94 problems span four areas: graph learning (sparse matrix operations, GNN primitives), computational biology (Smith-Waterman alignment, Evoformer blocks), robotics (GJK collision detection, rigid body dynamics), and probability/statistics (Gibbs sampling, flow-matching ODE solvers). Existing benchmarks do not test any of these.</p>
+
+  <p>Headline numbers: ST 12.7%, MT-Default 32.4%, MT-All 19.6%. For scientific computing kernels, compile-and-check feedback is the key enabler; profiling tools add overhead without improving correctness. The model benefits from seeing compilation errors and correctness failures, but hardware counter feedback does not move the needle and costs agent budget.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_subdomain_general.png" alt="Four-panel results for subdomain generation showing correctness and speedup across harnesses and problem domains">
+    <figcaption>Figure 8. Subdomain generation results across harnesses. MT-Default achieves the highest correctness (32.4%). MT-All underperforms at 19.6%.</figcaption>
+  </figure>
+
+  <p>The Pareto analysis reveals where gains come from. Speedups are dominated by kernel fusion: the model combines multiple Python-level operations into a single CUDA kernel, eliminating global memory round-trips. Tensor core utilization is below 5% across the board. These are memory-bound problems, and the solver that wins reduces memory traffic, not one that maximizes compute throughput.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_pareto.png" alt="Pareto frontier plots across speedup, speed-of-light, and energy for subdomain generation">
+    <figcaption>Figure 9. Pareto frontiers for subdomain generation. Winning kernels dominate on speedup and energy; SOL improvements are modest. Speedup driver is fusion, not hardware efficiency.</figcaption>
+  </figure>
+
+  <p>Resource efficiency: multi-turn agents spend roughly 15x more tokens than single-turn for approximately 2.5x the solve rate. More importantly, token spend within multi-turn runs is uncorrelated with the speedup of the final kernel. The agent that spends the most tokens does not produce the fastest kernel.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_fusion.png" alt="Fusion ratio distribution across submitted kernels">
+    <figcaption>Figure 12. Fusion ratio distribution. Most successful kernels fuse 2 to 4 operations. The correlation between fusion ratio and speedup is strong; the correlation between compute utilization and speedup is not.</figcaption>
+  </figure>
+
+  <h2>Hardware Translation Results</h2>
+
+  <p>PopcornBench is the first benchmark to evaluate LLM kernel translation across GPU generations, using human-written H100 references rather than PyTorch baselines.</p>
+
+  <h3>Multi-GPU: 8xA100 to 8xH100</h3>
+
+  <p>Translating multi-GPU kernels across GPU generations is near-intractable in single-turn mode: 4.2% correctness. Compile and correctness feedback alone (MT-Default) does not move the needle much. The gains come from MT-All, which reaches 22.2% correctness: a 5x improvement over ST.</p>
+
+  <p>The most striking data point: when the model actually invokes the profiling tools during a run, it solves the problem 100% of the time (7 out of 7). Profiling invocation is a near-perfect predictor of success in this track. The bottleneck is not observation capacity but the model knowing when to ask for hardware feedback.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_8xh100_general.png" alt="General results for 8xA100 to 8xH100 multi-GPU hardware translation: correctness rates by harness">
+    <figcaption>Figure 1. Multi-GPU translation correctness across harnesses. Single-turn at 4.2%, MT-All at 22.2%. The 5x gain is driven by cases where the model uses profiling feedback.</figcaption>
+  </figure>
+
+  <p>The failure mode is specific. Models can translate arithmetic structure: they convert tensor core operations from A100 to H100 semantics in straightforward cases. What they consistently miss are the H100-specific primitives: <code>wgmma</code> (warpgroup matrix multiply-accumulate), TMA (tensor memory access) descriptors, and asynchronous pipeline stages. These require understanding the SM90 memory hierarchy and synchronization model, not just the compute semantics.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_8xh100_trajectory.png" alt="Trajectory analysis showing tool use patterns and correctness outcomes across multi-GPU translation runs">
+    <figcaption>Figure 3. Tool use trajectory analysis for multi-GPU translation. Runs where the model invokes profiling tools show 100% correctness (7/7). The model rarely invokes them spontaneously.</figcaption>
+  </figure>
+
+  <h3>Single-GPU: A100 to H100</h3>
+
+  <p>The single-GPU track produces a reversal: MT-Default (27.1% correctness) beats MT-All (20.8%). More tools hurt.</p>
+
+  <p>The explanation: single-GPU A100-to-H100 translation is bottlenecked by instruction-level SM90 rewrites, not by insufficient hardware feedback. Profiling counters tell the model that utilization is low, but they do not tell it how to structure <code>wgmma</code> and TMA usage. The MT-All agent spends a disproportionate share of its token budget on profiling inspection, leaving fewer turns for code iteration. Observation surface was not the binding constraint.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_single_gpu_general.png" alt="General results for A100 to H100 single-GPU hardware translation showing correctness by harness">
+    <figcaption>Figure 4. Single-GPU translation correctness. MT-Default (27.1%) outperforms MT-All (20.8%), reversing the multi-GPU pattern. When the bottleneck is instruction-level rewrites, profiling access is a net cost on agent budget.</figcaption>
+  </figure>
+
+  <p>Even when models produce correct kernels, they are slower than the human reference: median speedup 0.94x. Correctness does not imply efficiency.</p>
+
+  <p>The kernel family breakdown shows where the ceiling is. CUTLASS kernels are the binding constraint: 11% correctness on MT-Default, 6% on MT-All. vLLM and Marlin kernels are substantially more tractable (38%/33% each). CUTLASS exposes the full complexity of the H100 memory hierarchy and requires precise CUTLASS 3.x API usage that models have limited training signal on.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_single_gpu_kernel_family.png" alt="Correctness rates broken down by kernel family: vLLM, Marlin, FlashAttention-2, and CUTLASS">
+    <figcaption>Figure 5. Single-GPU translation correctness by kernel family. CUTLASS is the clear bottleneck (11%/6%). vLLM and Marlin are substantially more tractable for current models.</figcaption>
+  </figure>
+
+  <h2>Evaluation Methodology: Preventing Reward Hacking</h2>
+
+  <p>This is a known problem in kernel benchmarking (Lange et al. 2025). When evaluation parameters -- batch size, sequence length, feature dimension -- are fixed and disclosed in the prompt, a model can read them and hardcode those values as template arguments or loop bounds. The compiled kernel runs extremely fast on the evaluation inputs because it does essentially no work at runtime; on any other input shape, it produces wrong results or crashes. PopcornBench addresses this with infrastructure: stress tests are baked into the harness, so contaminated results never reach the leaderboard. The numbers are stark: 96.6% of GPT-5.5&#39;s initially-correct kernels fail after stress testing (89/89 down to 3/89). The baseline reward-hacking rate is 69.9% with MT-Default; it drops to 21.1% when profiling tools are available, because hardware counter feedback (near-zero DRAM utilization, near-zero SOL) signals to the model that the kernel is not doing real work.</p>
+
+  <figure class="blog-figure">
+    <img src="images/blog/fig_reward_hack_scatter.png" alt="Speedup vs speed-of-light scatter plot showing two clusters: legitimate kernels near the diagonal, and reward-hacked kernels in the top-left corner with extreme speedup and near-zero SOL">
+    <figcaption>Figure 6a. Speedup versus speed-of-light (SOL) for all submitted kernels. Legitimate kernels cluster near the diagonal: high speedup correlates with high hardware utilization. Reward-hacked kernels occupy the top-left corner: extreme speedups at near-zero SOL. Without hardware metrics, these are indistinguishable from genuine results.</figcaption>
+  </figure>
+
+  <h2>Key Takeaways</h2>
+
+  <div class="callout-grid">
+    <div class="callout">
+      <strong>Scientific computing kernels expose different failure modes.</strong>
+      <p>Graph learning, computational biology, robotics, and probabilistic inference reveal capability gaps that standard DL operators do not. Domain coverage is not a cosmetic benchmark dimension -- it changes which models lead and by how much.</p>
+    </div>
+    <div class="callout">
+      <strong>Hardware translation is a concrete, measurable capability gap.</strong>
+      <p>Models can translate arithmetic structure but consistently miss SM90 instruction-level primitives: <code>wgmma</code>, TMA, asynchronous pipeline stages. CUTLASS is near-intractable. Correctness on translation tasks does not imply efficiency -- median speedup is 0.94x.</p>
+    </div>
+    <div class="callout">
+      <strong>More tools does not mean more solves.</strong>
+      <p>MT-All underperforms MT-Default on subdomain generation and single-GPU translation. Richer observation costs agent budget without improving what matters: correct SM90 rewrites and algorithmic structure discovery.</p>
+    </div>
+    <div class="callout">
+      <strong>Speedup comes from fusion, not hardware efficiency.</strong>
+      <p>Across all subdomain problems, the winning strategy is fusing operations to reduce global memory traffic. Tensor core utilization below 5%. The problem is memory-bandwidth, not compute.</p>
+    </div>
+    <div class="callout">
+      <strong>Stress testing and hardware metrics should be mandatory.</strong>
+      <p>Fixed disclosed evaluation parameters invite hardcoding. Any benchmark that skips stress testing on randomized input shapes is measuring reward hacking alongside kernel quality. SOL and DRAM utilization are the only way to tell the difference.</p>
+    </div>
+  </div>
+
+  <h2>What&#39;s Next</h2>
+
+  <p>The full problem set, evaluation harness, and all sweep results are available at the links below. We are expanding the model coverage (Grok-4.3 results pending) and the hardware translation track. The stress-testing infrastructure is open for integration into other kernel benchmarks that want to harden their evaluations against reward hacking.</p>
+
+  <div class="hero-links" style="margin-top:20px">
+    <a href="https://github.com/arjun-banerjee/POPCORNBENCH">GitHub / Code</a>
+    <a href="https://arjun-banerjee.github.io/POPCORNBENCH/experiments.html">Experiments Dashboard</a>
+  </div>
+
+</div>
+</body></html>

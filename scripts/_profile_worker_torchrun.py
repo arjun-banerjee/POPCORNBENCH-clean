@@ -93,7 +93,17 @@ def _rank_main(request_path: str, tmpdir: str) -> int:
 
     if not dist.is_initialized():
         try:
-            dist.init_process_group(backend="nccl")
+            from datetime import timedelta
+
+            import inspect
+
+            init_kw: dict = {
+                "backend": "nccl",
+                "timeout": timedelta(minutes=30),
+            }
+            if "device_id" in inspect.signature(dist.init_process_group).parameters:
+                init_kw["device_id"] = device
+            dist.init_process_group(**init_kw)
         except Exception as e:
             # Couldn't init NCCL — still write pid file with an error marker so
             # the parent's pid-presence check passes (we want the parent to
@@ -301,6 +311,11 @@ def _parent_main(request_path: str) -> int:
         env = os.environ.copy()
         env.pop("CUDA_VISIBLE_DEVICES", None)
         env.pop("HIP_VISIBLE_DEVICES", None)
+        from kernelbench.distributed_torchrun_eval import (
+            apply_torchrun_child_nccl_failfast_defaults,
+        )
+
+        apply_torchrun_child_nccl_failfast_defaults(env)
         env.setdefault("MASTER_ADDR", "127.0.0.1")
         env.setdefault("MASTER_PORT", "0")
         env.setdefault("NCCL_DEBUG", "WARN")

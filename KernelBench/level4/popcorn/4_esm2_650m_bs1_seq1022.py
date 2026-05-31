@@ -18,8 +18,12 @@ sequence_length = 1022
 batch_size = 1
 
 def get_inputs():
-    inputs = torch.randint(0, vocab_size, (batch_size, sequence_length))
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    sl = p.jitter_int(sequence_length)
+    inputs = torch.randint(0, vocab_size, (bs, sl))
     return [inputs]
+
 
 def get_init_inputs():
     return [model_name, config]

@@ -29,7 +29,7 @@ precision               = "fp16"
 gpu_arch                = ["Hopper"]
 timing_method           = "cuda_event"
 num_correct_trials      = 5
-num_perf_trials         = 50
+num_perf_trials         = 5
 tools                   = "default"
 
 # Hardware translation: 8xA100 .cu in prompt; I/O from TOML; oracle Python in hardware_translation/oracle/.
@@ -62,9 +62,11 @@ chat_context_tail_messages = 96
 # Default world size for the 8xH100 sweep — overridden per problem when an
 # io/*.toml sets distributed_world_size.
 distributed_torchrun_world_size = 8
-# Multi-rank torchrun eval timeout (s). Single-GPU eval inherits this when
-# the torchrun path falls back; profile_kernel uses 1800s internally.
-eval_torchrun_timeout_s = 5400
+# Multi-rank torchrun eval timeout (s). Hard ceiling per run_correctness /
+# submit_kernel torchrun subprocess (300s; num_perf_trials=5 keeps submit lighter).
+eval_torchrun_timeout_s = 300
+# When dynamic_eval_timeout is true: skip torchrun reference probe; use ceiling (see 8xh100_default.toml).
+reference_probe_enabled = false
 
 [parallelism]
 # Comm-sweep style: one work item at a time owns all 8 GPUs. multi_gpu=true
@@ -75,7 +77,8 @@ num_gpu_devices         = 1
 agents_per_gpu          = 1
 use_eval_queue          = false
 perf_lock_per_gpu       = false
-worker_timeout_s        = 7200
+# SIGALRM wall clock per work item: stay well above max_tool_calls × torchrun cap + LLM.
+worker_timeout_s        = 28800
 
 [report]
 enabled                 = true

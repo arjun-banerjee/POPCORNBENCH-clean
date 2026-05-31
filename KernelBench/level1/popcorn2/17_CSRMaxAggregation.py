@@ -1,0 +1,38 @@
+# popcorn2: large-tier module centers (scripts/gen_popcorn2_centers.py).
+# Source: KernelBench/level1/popcorn/17_CSRMaxAggregation.py
+
+import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    """
+    Per-destination max aggregation over neighbor features in CSR format.
+
+    This pattern appears in max-pooling GNNs and neighborhood feature
+    extraction where reductions are not sums but feature-wise maxima.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, row_ptr: torch.Tensor, col_idx: torch.Tensor, node_feat: torch.Tensor) -> torch.Tensor:
+        num_nodes = row_ptr.numel() - 1
+        feat_dim = node_feat.shape[1]
+        out = torch.full((num_nodes, feat_dim), float('-inf'), dtype=node_feat.dtype, device=node_feat.device)
+        for dst in range(num_nodes):
+            start = int(row_ptr[dst].item())
+            end = int(row_ptr[dst + 1].item())
+            if end > start:
+                out[dst] = node_feat[col_idx[start:end].long()].amax(dim=0)
+        return out
+num_nodes = 864
+avg_degree = 16
+feat_dim = 80
+
+def get_inputs():
+    p = popcorn_pri
+    mode = p.sample_input_mode()
+    return list(p.make_csr_graph(num_nodes, avg_degree, feat_dim, mode=mode))
+
+def get_init_inputs():
+    return []

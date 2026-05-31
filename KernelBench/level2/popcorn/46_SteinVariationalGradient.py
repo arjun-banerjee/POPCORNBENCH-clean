@@ -52,6 +52,7 @@ num_particles = 1024
 
 
 def get_inputs():
+    p = popcorn_pri
     return [torch.randn(num_particles, dim)]
 
 

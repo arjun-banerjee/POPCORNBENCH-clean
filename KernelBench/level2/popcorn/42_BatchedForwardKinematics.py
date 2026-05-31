@@ -62,7 +62,8 @@ link_scale = 0.15
 
 
 def get_inputs():
-    return [torch.empty(batch_size, num_joints).uniform_(-math.pi, math.pi)]
+    p = popcorn_pri
+    return [torch.empty(p.jitter_int(batch_size), num_joints).uniform_(-math.pi, math.pi)]
 
 
 def get_init_inputs():

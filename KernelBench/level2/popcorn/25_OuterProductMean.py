@@ -53,8 +53,9 @@ batch_size = 2
 
 
 def get_inputs():
-    msa_repr = torch.randn(batch_size, msa_depth, seq_len, msa_dim)
-    msa_mask = torch.ones(batch_size, msa_depth, seq_len)
+    p = popcorn_pri
+    msa_repr = torch.randn(p.jitter_int(batch_size), p.jitter_int(msa_depth), p.jitter_int(seq_len), msa_dim)
+    msa_mask = torch.ones(p.jitter_int(batch_size), p.jitter_int(msa_depth), p.jitter_int(seq_len))
     return [msa_repr, msa_mask]
 
 

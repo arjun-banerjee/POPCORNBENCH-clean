@@ -60,7 +60,8 @@ num_samples = 4096
 
 def get_inputs():
     q_std = 3.0
-    return [torch.randn(num_samples, dim) * q_std]
+    n = popcorn_pri.jitter_int(num_samples)
+    return [torch.randn(n, dim) * q_std]
 
 
 def get_init_inputs():

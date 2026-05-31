@@ -56,7 +56,8 @@ batch_size = 64
 
 
 def get_inputs():
-    return [torch.randint(0, num_obs, (batch_size, seq_len))]
+    p = popcorn_pri
+    return [torch.randint(0, num_obs, (p.jitter_int(batch_size), p.jitter_int(seq_len)))]
 
 
 def get_init_inputs():

@@ -42,9 +42,8 @@ class Model(nn.Module):
 
 def get_inputs():
     dev = default_device()
-    g = torch.Generator(device=dev)
-    g.manual_seed(16)
-    return [torch.randn(R, B, C, device=dev, generator=g)]
+    p = popcorn_pri
+    return [torch.randn(R, p.jitter_int(B), p.jitter_int(C), device=dev)]
 
 
 def get_init_inputs():

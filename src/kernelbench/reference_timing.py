@@ -261,7 +261,10 @@ def _probe_via_torchrun(
     seed_num: int,
 ) -> Optional[float]:
     """Spawn torchrun + reference-only worker; return rank-0 mean seconds."""
-    from kernelbench.distributed_torchrun_eval import _count_physical_gpus
+    from kernelbench.distributed_torchrun_eval import (
+        _count_physical_gpus,
+        apply_torchrun_child_nccl_failfast_defaults,
+    )
 
     if torch.cuda.is_available():
         physical = _count_physical_gpus()
@@ -293,6 +296,7 @@ def _probe_via_torchrun(
         env = os.environ.copy()
         env.pop("CUDA_VISIBLE_DEVICES", None)
         env.pop("HIP_VISIBLE_DEVICES", None)
+        apply_torchrun_child_nccl_failfast_defaults(env)
         env.setdefault("MASTER_ADDR", "127.0.0.1")
         env.setdefault("MASTER_PORT", "0")
         env.setdefault("NCCL_DEBUG", "WARN")

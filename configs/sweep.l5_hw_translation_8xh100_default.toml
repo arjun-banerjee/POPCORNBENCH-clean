@@ -12,18 +12,19 @@
 #   uv run python scripts/run_sweep.py configs/sweep.l5_hw_translation_8xh100_default.toml
 
 [run]
-name                    = "fl5_hw_translation_8xh100_default_gpt"
+name                    = "s1_l5_hw_translation_8xh100_default_gpt"
 dataset_src             = "local"
 variants                = ["hardware_translation_stub"]
 levels                  = [5]
 # Problems 29 & 30 have no kernels/8xa100/<stem>.cu source; omit to avoid prompt-build failures.
-problem_subset          = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 22, 23, 25, 26, 27, 28]
+problem_subset          = [1, 2, 3, 4, 5, 7, 8, 9, 10, 22, 23, 25, 26, 27, 28]
 backend                 = "cuda"
 precision               = "fp16"
 gpu_arch                = ["Hopper"]
 timing_method           = "cuda_event"
-num_correct_trials      = 5
-num_perf_trials         = 50
+num_correct_trials        = 1   # run_correctness only
+submit_num_correct_trials = 3   # submit_kernel correctness only
+num_perf_trials         = 5
 tools                   = "default"
 
 # Hardware translation: 8xA100 .cu in prompt; I/O from TOML; oracle Python in hardware_translation/oracle/.
@@ -39,6 +40,9 @@ hardware_translation_io_dir      = "KernelBench/level5/hardware_translation/io"
 hardware_translation_oracle_dir  = "KernelBench/level5/hardware_translation/oracle"
 
 [agent]
+verbose                 = true
+# Live-stream torchrun stdout/stderr during multi-GPU eval (trial logs); ranks interleave.
+stream_torchrun_stdout  = true
 max_turns               = 15
 max_tool_calls          = 30
 warn_turns_remaining    = 3
@@ -52,10 +56,9 @@ chat_context_tail_messages = 96
 # io/*.toml sets distributed_world_size.
 distributed_torchrun_world_size = 8
 # Multi-rank torchrun eval timeout (s). Acts as the HARD CEILING for both
-# run_correctness and submit_kernel; the dynamic-timeout logic below derives
-# per-tool caps from a once-per-problem reference forward probe and clamps to
-# this value.
-eval_torchrun_timeout_s = 5400
+# run_correctness and submit_kernel; dynamic-timeout logic clamps to this value
+# (300s cap; num_perf_trials=5 on submit).
+eval_torchrun_timeout_s = 300
 
 # Dynamic per-tool eval timeouts (kernelbench.reference_timing). When enabled,
 # we probe the reference forward time once per (level, problem_id, world_size)
@@ -65,11 +68,14 @@ eval_torchrun_timeout_s = 5400
 #                       + correctness_timeout_k * num_correct_trials * t_ref))
 #   dyn_submit      = min(ceiling, max(submit_floor_s,
 #                       submit_overhead_s
-#                       + submit_timeout_k * (num_correct_trials
+#                       + submit_timeout_k * (submit_num_correct_trials
 #                         + num_perf_trials) * t_ref))
 # Probe itself is bounded by reference_probe_timeout_s; on failure both
 # fall back to ceiling. Set dynamic_eval_timeout = false to disable.
+# Set reference_probe_enabled = false to keep dynamic_eval_timeout on but skip
+# the probe (same ceiling fallback, no torchrun probe attempt).
 dynamic_eval_timeout      = true
+reference_probe_enabled   = false
 correctness_overhead_s    = 120
 correctness_timeout_k     = 10
 correctness_floor_s       = 120
@@ -85,8 +91,8 @@ num_gpu_devices         = 1
 agents_per_gpu          = 1
 use_eval_queue          = false
 perf_lock_per_gpu       = false
-# Up to 15 turns * ~5400s torchrun budget = many hours per agent.
-worker_timeout_s        = 14400
+# SIGALRM per work item: >> eval_torchrun_timeout_s × typical heavy tool calls + LLM.
+worker_timeout_s        = 28800
 llm_global_concurrency  = 0
 
 [report]

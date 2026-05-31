@@ -54,9 +54,15 @@ class EvalRPCClient:
             "precision": ctx.precision,
             "build_dir": ctx.build_dir,
             "num_correct_trials": ctx.num_correct_trials,
+            "submit_num_correct_trials": int(
+                getattr(ctx, "submit_num_correct_trials", ctx.num_correct_trials)
+            ),
             "num_perf_trials": ctx.num_perf_trials,
             "timing_method": ctx.timing_method,
             "verbose": ctx.verbose,
+            "stream_torchrun_stdout": bool(
+                getattr(ctx, "stream_torchrun_stdout", False)
+            ),
             # Multi-rank knobs. Servers can ignore these (they're pinned to a
             # single GPU and so cannot drive torchrun), but we forward them
             # for API symmetry — a future "hybrid" eval server could spawn
@@ -65,6 +71,20 @@ class EvalRPCClient:
                 getattr(ctx, "distributed_torchrun_world_size", 1) or 1
             ),
             "eval_torchrun_timeout_s": effective_torchrun_timeout,
+            "level": int(getattr(ctx, "level", 0) or 0),
+            "problem_id": int(getattr(ctx, "problem_id", 0) or 0),
+            "variant": str(getattr(ctx, "variant", "")),
+            "problem_name": str(getattr(ctx, "problem_name", "")),
+            "popcorn_stress_eval": bool(getattr(ctx, "popcorn_stress_eval", False)),
+            "stress_refs_root": str(
+                getattr(ctx, "stress_refs_root", "KernelBench/stress_refs2")
+            ),
+            "stress_tiers": list(
+                getattr(ctx, "stress_tiers", ("large", "awkward", "xl"))
+            ),
+            "stress_num_correct_trials_per_tier": getattr(
+                ctx, "stress_num_correct_trials_per_tier", None
+            ),
         }
 
     def submit_kernel(self, ctx, kernel_code: str, *, timeout_s: int | None = None):

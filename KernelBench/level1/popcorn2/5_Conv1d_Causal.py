@@ -1,0 +1,41 @@
+# popcorn2: large-tier module centers (scripts/gen_popcorn2_centers.py).
+# Source: KernelBench/level1/popcorn/5_Conv1d_Causal.py
+
+import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    """
+    Performs a causal 1D convolution: left-padded so each output only depends on current and past inputs.
+    Used in autoregressive sequence models (Mamba, Hyena, WaveNet, TCN) for causal sequence processing.
+
+    Args:
+        in_channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+        kernel_size (int): Size of the convolution kernel.
+        dilation (int, optional): Dilation rate. Defaults to 1.
+        bias (bool, optional): If True, adds a learnable bias. Defaults to False.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int=1, bias: bool=False):
+        super(Model, self).__init__()
+        self.causal_padding = (kernel_size - 1) * dilation
+        self.conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation, bias=bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.nn.functional.pad(x, (self.causal_padding, 0))
+        return self.conv1d(x)
+batch_size = 64
+in_channels = 320
+out_channels = 320
+kernel_size = 4
+dilation = 1
+seq_len = 16384
+
+def get_inputs():
+    p = popcorn_pri
+    mode = p.sample_input_mode()
+    return [torch.randn(p.trial_dim(batch_size, 'batch_size', mode=mode), in_channels, p.trial_dim(seq_len, 'seq_len', mode=mode))]
+
+def get_init_inputs():
+    return [in_channels, out_channels, kernel_size, dilation]

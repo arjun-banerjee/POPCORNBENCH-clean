@@ -34,7 +34,7 @@ channels = 256
 seq_len = 8192
 
 def get_inputs():
-    return [torch.randn(batch_size, channels, seq_len)]
+    return [torch.randn(popcorn_pri.jitter_int(batch_size), channels, seq_len)]
 
 def get_init_inputs():
     return [channels, seq_len]

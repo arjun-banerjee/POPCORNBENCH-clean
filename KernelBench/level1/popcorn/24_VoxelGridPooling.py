@@ -63,8 +63,11 @@ batch_size = 4
 
 
 def get_inputs():
-    coords = torch.randn(batch_size, num_atoms, 3) * 5.0
-    features = torch.randn(batch_size, num_atoms, feat_dim)
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    na = p.jitter_int(num_atoms)
+    coords = torch.randn(bs, na, 3) * 5.0
+    features = torch.randn(bs, na, feat_dim)
     return [coords, features]
 
 

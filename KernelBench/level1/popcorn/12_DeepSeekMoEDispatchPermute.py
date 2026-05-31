@@ -35,18 +35,9 @@ num_experts = 16
 
 
 def get_inputs():
-    token_hidden = torch.randn(num_tokens, hidden_dim, dtype=torch.float32)
-    expert_idx = torch.arange(num_tokens, dtype=torch.int32) % num_experts
-    counts = torch.bincount(expert_idx.to(torch.int64), minlength=num_experts).to(torch.int32)
-    expert_offsets = torch.zeros(num_experts + 1, dtype=torch.int32)
-    expert_offsets[1:] = torch.cumsum(counts, dim=0)
-    slot_cursor = torch.zeros(num_experts, dtype=torch.int32)
-    slot_idx = torch.empty(num_tokens, dtype=torch.int32)
-    for token in range(num_tokens):
-        expert = int(expert_idx[token].item())
-        slot_idx[token] = slot_cursor[expert]
-        slot_cursor[expert] += 1
-    return [token_hidden, expert_idx, slot_idx, expert_offsets]
+    return popcorn_pri.moe_dispatch_inputs(num_tokens, hidden_dim, num_experts)
+
+
 
 
 def get_init_inputs():

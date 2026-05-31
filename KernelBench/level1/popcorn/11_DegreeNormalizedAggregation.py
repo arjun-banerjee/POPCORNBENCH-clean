@@ -42,22 +42,11 @@ avg_degree = 16
 feat_dim = 80
 
 
-def _make_graph():
-    degree = torch.full((num_nodes,), avg_degree, dtype=torch.int32)
-    degree = torch.clamp(degree + ((torch.arange(num_nodes, dtype=torch.int32) % 11) - 5), min=1)
-    row_ptr = torch.zeros(num_nodes + 1, dtype=torch.int32)
-    row_ptr[1:] = torch.cumsum(degree, dim=0)
-    num_edges = int(row_ptr[-1].item())
-    col_idx = torch.randint(0, num_nodes, (num_edges,), dtype=torch.int32)
-    node_feat = torch.randn(num_nodes, feat_dim, dtype=torch.float32)
-
-    # Source-side degrees derived from column occurrences, plus one for safety.
-    degrees = torch.bincount(col_idx.long(), minlength=num_nodes).to(torch.float32) + 1.0
-    return row_ptr, col_idx, node_feat, degrees
 
 
 def get_inputs():
-    return list(_make_graph())
+    return list(popcorn_pri.make_csr_degree_normalized_graph(num_nodes, avg_degree, feat_dim))
+
 
 
 def get_init_inputs():

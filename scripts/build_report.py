@@ -213,6 +213,7 @@ header .page-wrap { padding-top: 36px; padding-bottom: 24px; }
 .outcome-error { color: var(--r); }
 .outcome-skipped { opacity: 0.45; }
 .outcome-unknown { opacity: 0.4; }
+.outcome-pending { color: var(--g); opacity: 0.55; font-style: italic; }
 .outcome-in_progress { color: var(--g); font-style: italic; }
 .outcome-in_progress::after { content: " ●"; animation: blink 1.4s infinite; }
 @keyframes blink { 0%,50%,100% { opacity: 1; } 25%,75% { opacity: 0.25; } }
@@ -234,6 +235,23 @@ header .page-wrap { padding-top: 36px; padding-bottom: 24px; }
 }
 .tldr-cell .l { font-size: 10px; opacity: 0.45; font-style: italic; letter-spacing: 0.07em; }
 .tldr-cell .v { font-size: 14px; }
+
+/* popcorn stress re-eval (reval_popcorn_stress_sweep) */
+.stress-block {
+  border: 1px solid var(--g15); margin: 18px 0; background: var(--w);
+}
+.stress-block > summary {
+  padding: 10px 14px; cursor: pointer; font-size: 12px;
+  background: var(--g08); border-bottom: 1px solid var(--g15);
+}
+.stress-inner { padding: 12px 14px 16px; font-size: 13px; }
+.stress-line { display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+.stress-line .l { font-size: 10px; opacity: 0.45; font-style: italic; min-width: 140px; }
+.stress-line .v { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+.stress-errors { margin: 12px 0; font-size: 12px; }
+.stress-errors ul { margin: 6px 0 0 18px; }
+.stress-warn { color: var(--y); font-size: 12px; margin: 8px 0; }
+.stress-tier-table { margin-top: 12px; }
 
 /* extended metrics block */
 .metrics {
@@ -460,7 +478,16 @@ def _load_all_trajectories(run_dir: str) -> list[dict]:
 
 
 def _outcome_class(outcome: str) -> str:
-    return f"outcome-{outcome}" if outcome else "outcome-unknown"
+    if not (outcome or "").strip():
+        return "outcome-pending"
+    return f"outcome-{outcome}"
+
+
+def _outcome_badge_label(outcome: Any) -> str:
+    """Human-readable badge text (empty outcome → pending stress queue)."""
+    if outcome is None or (isinstance(outcome, str) and not outcome.strip()):
+        return "pending"
+    return str(outcome)
 
 
 def _speedup(d: dict) -> float | None:
@@ -570,7 +597,11 @@ def _render_sitemap(by_variant: dict[str, list[dict]], *, link_prefix: str,
 def _outcome_counts(trajs: list[dict]) -> dict[str, int]:
     out: dict[str, int] = {}
     for d in trajs:
-        o = d.get("outcome") or "unknown"
+        o = d.get("outcome")
+        if o is None or (isinstance(o, str) and not o.strip()):
+            o = "pending"
+        else:
+            o = str(o)
         out[o] = out.get(o, 0) + 1
     return out
 
@@ -752,7 +783,9 @@ def _render_model_page(model: str, variant: str, trajs: list[dict],
     ):
         level = d.get("level")
         pid = d.get("problem_id")
-        outcome = d.get("outcome", "unknown")
+        outcome = d.get("outcome")
+        oc = _outcome_class("" if outcome is None else str(outcome))
+        ol = html.escape(_outcome_badge_label(outcome))
         sp = _speedup(d)
         sp_str = ""
         if sp is not None:
@@ -767,7 +800,7 @@ def _render_model_page(model: str, variant: str, trajs: list[dict],
     <span class="card-meta">{html.escape(d.get('problem_name','')[:32])}</span>
   </div>
   <div class="card-row">
-    <span class="outcome-badge {_outcome_class(outcome)}">{outcome}</span>
+    <span class="outcome-badge {oc}">{ol}</span>
     {sp_str}
     <span class="card-runtime">{rt_str}</span>
   </div>
@@ -952,10 +985,12 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
     wall_str = (
         f"{float(wall_raw):.1f}s" if isinstance(wall_raw, (int, float)) else "—"
     )
+    _out_badge_cls = _outcome_class(d.get("outcome", ""))
+    _out_badge_lbl = html.escape(_outcome_badge_label(d.get("outcome")))
 
     tldr = f"""<div class="tldr">
 <div class="card-row">
-  <span class="outcome-badge {_outcome_class(d.get('outcome',''))}">{d.get('outcome','?')}</span>
+  <span class="outcome-badge {_out_badge_cls}">{_out_badge_lbl}</span>
   <span style="font-size:13px;">{html.escape(d.get('problem_name',''))}</span>
 </div>
 <div class="tldr-grid">
@@ -979,6 +1014,7 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
 </div>"""
 
     metrics_html = _render_extended_metrics(fr)
+    stress_html = _render_stress_block(d)
 
     # Reference PyTorch source — loaded from KernelBench at render time.
     ref_src = _load_reference_source(d.get("level"), d.get("_variant", "original"),
@@ -1052,7 +1088,7 @@ def _render_trajectory(d: dict, run_name: str, generated_at: str,
     tier_picker = _render_tier_picker(d, run_name, sibling_tiers or {})
 
     body = (head + sitemap
-            + f'<div class="page-wrap">{tier_picker}{tldr}{metrics_html}{ref_block}'
+            + f'<div class="page-wrap">{tier_picker}{tldr}{stress_html}{metrics_html}{ref_block}'
             f'{ae_progress_block}{"".join(turns_html)}{kernel_block}</div>')
     return body
 
@@ -1176,6 +1212,144 @@ def _section(title: str, source: str, cells: list[str]) -> str:
             f'<div class="metrics-head"><span>{html.escape(title)}</span>'
             f'<span class="src">{html.escape(source)}</span></div>'
             f'<div class="metrics-grid">{"".join(cells)}</div></div>')
+
+
+def _render_stress_block(d: dict) -> str:
+    """Popcorn stress re-eval summary (``reval_popcorn_stress_sweep``) when present."""
+    fr = d.get("final_result") or {}
+    md = fr.get("metadata") if isinstance(fr.get("metadata"), dict) else {}
+    se = d.get("stress_eval") if isinstance(d.get("stress_eval"), dict) else {}
+    if not md.get("stress_popcorn_eval") and not se:
+        return ""
+
+    parts: list[str] = [
+        '<details class="stress-block" open>',
+        '<summary><b>popcorn stress re-eval</b> '
+        "(<code>large</code> / <code>awkward</code> / <code>xl</code> refs — "
+        "see merged <code>final_result</code> in TLDR above)</summary>",
+        '<div class="stress-inner">',
+    ]
+
+    refs = se.get("stress_refs") or md.get("stress_refs_root") or "—"
+    parts.append(
+        '<div class="stress-line"><span class="l">stress refs root</span>'
+        f'<span class="v">{html.escape(str(refs))}</span></div>'
+    )
+
+    tiers = se.get("tiers") or md.get("stress_tiers_order") or md.get("stress_tiers") or []
+    if tiers:
+        parts.append(
+            '<div class="stress-line"><span class="l">tiers</span>'
+            f'<span class="v">{html.escape(", ".join(str(t) for t in tiers))}</span></div>'
+        )
+
+    nct = se.get("num_correct_trials_per_tier")
+    if nct is None:
+        nct = md.get("stress_num_correct_trials_per_tier")
+    if nct is not None:
+        tot = md.get("stress_total_correctness_executions")
+        line = f"{nct} per tier"
+        if tot is not None:
+            line += f" ({tot} total correctness runs)"
+        parts.append(
+            '<div class="stress-line"><span class="l">correctness trials</span>'
+            f'<span class="v">{html.escape(line)}</span></div>'
+        )
+
+    te = se.get("tier_errors") or md.get("stress_tier_errors") or {}
+    if isinstance(te, dict) and te:
+        lis = [
+            f"<li><b>{html.escape(str(k))}</b>: {html.escape(str(v)[:800])}</li>"
+            for k, v in te.items()
+            if v
+        ]
+        if lis:
+            parts.append(
+                '<div class="stress-errors"><b>tier errors</b><ul>'
+                + "".join(lis)
+                + "</ul></div>"
+            )
+
+    missing = md.get("stress_missing_tiers")
+    if missing:
+        parts.append(
+            '<div class="stress-warn">missing tiers: '
+            f"{html.escape(str(missing))}</div>"
+        )
+
+    per = md.get("stress_per_tier") if isinstance(md.get("stress_per_tier"), dict) else {}
+    order = md.get("stress_tiers_order")
+    if not isinstance(order, list):
+        order = list(per.keys())
+    if per:
+        thead = (
+            "<tr><th>tier</th><th>compiled</th><th>correct</th>"
+            "<th>kernel μs</th><th>ref μs</th><th>speedup</th><th>energy</th></tr>"
+        )
+        body_rows: list[str] = []
+        for tier in order:
+            tr = per.get(tier)
+            if not isinstance(tr, dict):
+                continue
+            rt = float(tr.get("runtime") or -1)
+            rrt = float(tr.get("ref_runtime") or -1)
+            sp: float | None
+            if rt > 0 and rrt > 0:
+                sp = rrt / rt
+            else:
+                sp = None
+            en = tr.get("energy_stats") if isinstance(tr.get("energy_stats"), dict) else {}
+            if en.get("error"):
+                en_cell = "err: " + str(en.get("error"))[:56]
+            elif (en.get("energy_per_run_mj") or -1) > 0:
+                en_cell = _fmt(en.get("energy_per_run_mj")) + " mJ/run"
+            else:
+                en_cell = "—"
+            body_rows.append(
+                f"<tr><td>{html.escape(str(tier))}</td>"
+                f"<td>{'yes' if tr.get('compiled') else 'no'}</td>"
+                f"<td>{'yes' if tr.get('correctness') else 'no'}</td>"
+                f"<td>{_fmt(rt, ' μs')}</td>"
+                f"<td>{_fmt(rrt, ' μs')}</td>"
+                f"<td>{_fmt(sp, 'x') if sp is not None else '—'}</td>"
+                f"<td>{html.escape(en_cell)}</td></tr>"
+            )
+        if body_rows:
+            parts.append(
+                '<table class="model-table stress-tier-table"><thead>'
+                f"{thead}</thead><tbody>{''.join(body_rows)}</tbody></table>"
+            )
+
+    dbg: dict[str, Any] = {"stress_eval": se}
+    sm: dict[str, Any] = {}
+    for k in (
+        "stress_popcorn_eval",
+        "stress_tiers",
+        "stress_tiers_order",
+        "stress_num_correct_trials_per_tier",
+        "stress_total_correctness_executions",
+        "stress_per_tier",
+        "stress_tier_errors",
+        "stress_missing_tiers",
+        "stress_eval_script",
+        "stress_eval_at",
+        "stress_refs_root",
+    ):
+        if k in md:
+            sm[k] = md[k]
+    if sm:
+        dbg["final_result.metadata (stress keys)"] = sm
+    try:
+        js = json.dumps(dbg, indent=2, default=str)
+    except (TypeError, ValueError):
+        js = "{}"
+    parts.append(
+        '<details class="ref-source"><summary>raw stress JSON (debug)</summary>'
+        f'<pre class="block">{html.escape(js)}</pre></details>'
+    )
+
+    parts.append("</div></details>")
+    return "".join(parts)
 
 
 def _render_extended_metrics(fr: dict) -> str:
@@ -1456,7 +1630,9 @@ def _render_level_index(run_name: str, level: int, trajs: list[dict],
         for model in sorted(by_model.keys()):
             for d in sorted(by_model[model], key=lambda x: x.get("problem_id", 0)):
                 pid = d.get("problem_id")
-                outcome = d.get("outcome", "unknown")
+                outcome = d.get("outcome")
+                oc = _outcome_class("" if outcome is None else str(outcome))
+                ol = html.escape(_outcome_badge_label(outcome))
                 sp = _speedup(d)
                 sp_str = ""
                 if sp is not None:
@@ -1474,7 +1650,7 @@ def _render_level_index(run_name: str, level: int, trajs: list[dict],
                     f'{html.escape((d.get("problem_name") or "")[:32])}</span>'
                     f'</div>'
                     f'<div class="card-row">'
-                    f'<span class="outcome-badge {_outcome_class(outcome)}">{outcome}</span>'
+                    f'<span class="outcome-badge {oc}">{ol}</span>'
                     f'{sp_str}<span class="card-runtime">{rt_str}</span>'
                     f'</div></a>'
                 )

@@ -135,10 +135,12 @@ class _FakeCtx:
             build_dir=None,
             verbose=False,
             num_correct_trials=5,
+            submit_num_correct_trials=5,
             num_perf_trials=50,
             distributed_torchrun_world_size=8,
             eval_torchrun_timeout_s=5400,
             dynamic_eval_timeout=True,
+            reference_probe_enabled=True,
             correctness_overhead_s=120,
             correctness_timeout_k=10.0,
             correctness_floor_s=120,
@@ -197,6 +199,30 @@ def test_resolve_falls_back_to_ceiling_when_probe_returns_none():
     assert dyn_s == 5400
 
 
+def test_resolve_skips_probe_when_reference_probe_disabled():
+    from kernelbench.agent import tools as tools_mod
+
+    ctx = _FakeCtx(reference_probe_enabled=False)
+    with patch.object(tools_mod, "probe_reference_runtime", return_value=1.0) as probe:
+        dyn_c, dyn_s = tools_mod._resolve_dynamic_eval_timeouts(ctx)
+    assert not probe.called
+    assert dyn_c == 5400
+    assert dyn_s == 5400
+
+
+def test_resolve_submit_uses_submit_num_correct_trials_distinct_from_run():
+    """submit_kernel dyn timeout uses submit_num_correct_trials + num_perf_trials."""
+    from kernelbench.agent import tools as tools_mod
+
+    ctx = _FakeCtx(num_correct_trials=2, submit_num_correct_trials=5)
+    with patch.object(tools_mod, "probe_reference_runtime", return_value=1.0):
+        dyn_c, dyn_s = tools_mod._resolve_dynamic_eval_timeouts(ctx)
+    # correctness: 120 + 10 * 2 * 1 = 140
+    assert dyn_c == 140
+    # submit: 180 + 10 * (5 + 50) * 1 = 730
+    assert dyn_s == 730
+
+
 # ---------------------------------------------------------------------------
 # 3. Tools forward the dynamic timeout into eval_kernel_via_torchrun
 # ---------------------------------------------------------------------------
@@ -215,6 +241,7 @@ def _make_full_ctx(**overrides):
         device=torch.device("cpu"),
         build_dir=None,
         num_correct_trials=5,
+        submit_num_correct_trials=5,
         num_perf_trials=50,
         timing_method="cuda_event",
         verbose=False,
@@ -264,7 +291,27 @@ def test_run_correctness_forwards_dynamic_timeout():
         result = tool.execute(ctx, kernel_code="x = 1\n")
 
     assert captured.get("timeout_s") == 170, captured.get("timeout_s")
+    assert captured.get("stream_stdout") is False
+    assert captured.get("num_correct_trials") == 5
     assert result.success is True
+
+
+def test_run_correctness_forwards_stream_torchrun_stdout():
+    from kernelbench.agent import tools as tools_mod
+
+    ctx = _make_full_ctx(stream_torchrun_stdout=True)
+    captured: dict = {}
+
+    def fake_eval_torchrun(**kwargs):
+        captured.update(kwargs)
+        return _fake_kernel_exec_result(ok=True)
+
+    with patch.object(tools_mod, "probe_reference_runtime", return_value=1.0), patch.object(
+        tools_mod, "eval_kernel_via_torchrun", side_effect=fake_eval_torchrun
+    ):
+        tools_mod.RunCorrectnessTool().execute(ctx, kernel_code="x = 1\n")
+
+    assert captured.get("stream_stdout") is True
 
 
 def test_submit_kernel_forwards_dynamic_timeout():
@@ -293,6 +340,33 @@ def test_submit_kernel_forwards_dynamic_timeout():
         tool.execute(ctx, kernel_code="x = 1\n")
 
     assert captured.get("timeout_s") == 730, captured.get("timeout_s")
+    assert captured.get("num_correct_trials") == 5
+
+
+def test_submit_kernel_forwards_submit_num_correct_trials_distinct_from_run():
+    from kernelbench.agent import tools as tools_mod
+
+    ctx = _make_full_ctx(num_correct_trials=2, submit_num_correct_trials=7)
+    captured: dict = {}
+
+    def fake_eval_torchrun(**kwargs):
+        captured.update(kwargs)
+        from kernelbench.eval import KernelExecResult
+
+        return KernelExecResult(
+            compiled=True,
+            correctness=True,
+            runtime=1.234,
+            runtime_stats={"mean": 1.234},
+            metadata={"correctness_trials": "7/7"},
+        )
+
+    with patch.object(tools_mod, "probe_reference_runtime", return_value=1.0), patch.object(
+        tools_mod, "eval_kernel_via_torchrun", side_effect=fake_eval_torchrun
+    ):
+        tools_mod.SubmitKernelTool().execute(ctx, kernel_code="x = 1\n")
+
+    assert captured.get("num_correct_trials") == 7
 
 
 def test_eval_rpc_client_run_correctness_forwards_timeout():
@@ -321,6 +395,9 @@ def test_eval_rpc_client_run_correctness_forwards_timeout():
 
     assert captured_call["kind"] == "correctness"
     assert captured_call["args"]["eval_torchrun_timeout_s"] == 170
+    assert captured_call["args"].get("stream_torchrun_stdout") is False
+    assert captured_call["args"]["num_correct_trials"] == 5
+    assert captured_call["args"]["submit_num_correct_trials"] == 5
     # RPC wait = max(170 + 60, default 3600) = 3600 here (default dominates).
     assert captured_call["rpc_timeout_s"] == 3600
 

@@ -25,7 +25,8 @@ width = 224
 
 
 def get_inputs():
-    return [torch.randn(batch_size, channels, height, width)]
+    p = popcorn_pri
+    return [torch.randn(p.jitter_int(batch_size), channels, p.jitter_int(height), p.jitter_int(width))]
 
 
 def get_init_inputs():

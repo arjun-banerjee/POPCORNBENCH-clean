@@ -103,7 +103,8 @@ kernel_size = 3
 
 
 def get_inputs():
-    x = torch.randn(batch_size, channels, height, width)
+    p = popcorn_pri
+    x = torch.randn(p.jitter_int(batch_size), channels, p.jitter_int(height), p.jitter_int(width))
     return [x]
 
 

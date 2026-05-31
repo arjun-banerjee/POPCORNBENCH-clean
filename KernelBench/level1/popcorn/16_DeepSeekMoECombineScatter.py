@@ -33,10 +33,9 @@ fanout = 2
 
 
 def get_inputs():
-    expert_hidden = torch.randn(num_tokens * fanout, hidden_dim, dtype=torch.float32)
-    token_idx = torch.arange(num_tokens, dtype=torch.int32).repeat_interleave(fanout)
-    gates = torch.softmax(torch.randn(num_tokens, fanout, dtype=torch.float32), dim=-1).reshape(-1)
-    return [expert_hidden, token_idx, gates, num_tokens]
+    return popcorn_pri.moe_combine_inputs(num_tokens, hidden_dim, fanout)
+
+
 
 
 def get_init_inputs():

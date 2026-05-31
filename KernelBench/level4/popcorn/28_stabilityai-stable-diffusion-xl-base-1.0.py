@@ -22,9 +22,10 @@ cross_attn_dim = 2048
 
 
 def get_inputs():
-    sample = torch.randn(batch_size, channels, height, width)
-    timestep = torch.randint(0, 1000, (batch_size,), dtype=torch.long)
-    encoder_hidden_states = torch.randn(batch_size, context_len, cross_attn_dim)
+    p = popcorn_pri
+    sample = torch.randn(p.jitter_int(batch_size), p.jitter_int(channels, align=8), p.jitter_int(height), p.jitter_int(width))
+    timestep = torch.randint(0, p.jitter_int(1000) , (p.jitter_int(batch_size),), dtype=torch.long)
+    encoder_hidden_states = torch.randn(p.jitter_int(batch_size), p.jitter_int(context_len), p.jitter_int(cross_attn_dim, align=8))
     return [sample, timestep, encoder_hidden_states]
 
 

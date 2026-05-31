@@ -268,9 +268,19 @@ def _build_server_context(args: dict[str, Any], device) -> "Any":
         device=device,
         build_dir=args.get("build_dir"),
         num_correct_trials=int(args.get("num_correct_trials", 5)),
+        submit_num_correct_trials=max(
+            1,
+            int(
+                args.get(
+                    "submit_num_correct_trials",
+                    args.get("num_correct_trials", 5),
+                )
+            ),
+        ),
         num_perf_trials=int(args.get("num_perf_trials", 100)),
         timing_method=args.get("timing_method", "cuda_event"),
         verbose=bool(args.get("verbose", False)),
+        stream_torchrun_stdout=bool(args.get("stream_torchrun_stdout", False)),
         # See eval_client._ctx_args — the queue path is pinned to one GPU so
         # in practice the server cannot drive torchrun and we'd never see
         # ws > 1 here. We still preserve the values for symmetry.
@@ -279,5 +289,17 @@ def _build_server_context(args: dict[str, Any], device) -> "Any":
         ),
         eval_torchrun_timeout_s=int(
             args.get("eval_torchrun_timeout_s", 3600) or 3600
+        ),
+        level=int(args.get("level", 0) or 0),
+        problem_id=int(args.get("problem_id", 0) or 0),
+        variant=str(args.get("variant", "")),
+        problem_name=str(args.get("problem_name", "")),
+        popcorn_stress_eval=bool(args.get("popcorn_stress_eval", False)),
+        stress_refs_root=str(
+            args.get("stress_refs_root", "KernelBench/stress_refs2")
+        ),
+        stress_tiers=tuple(args.get("stress_tiers") or ("large", "awkward", "xl")),
+        stress_num_correct_trials_per_tier=args.get(
+            "stress_num_correct_trials_per_tier"
         ),
     )

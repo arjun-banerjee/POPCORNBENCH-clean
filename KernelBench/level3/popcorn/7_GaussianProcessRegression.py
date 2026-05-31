@@ -59,9 +59,10 @@ batch_size = 8
 
 
 def get_inputs():
-    X_train = torch.randn(batch_size, num_train, input_dim)
-    Y_train = torch.randn(batch_size, num_train, 1)
-    X_test = torch.randn(batch_size, num_test, input_dim)
+    p = popcorn_pri
+    X_train = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_train), input_dim)
+    Y_train = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_train), 1)
+    X_test = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_test), input_dim)
     return [X_train, Y_train, X_test]
 
 

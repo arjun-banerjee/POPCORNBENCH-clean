@@ -70,9 +70,10 @@ batch_size = 16
 
 
 def get_inputs():
-    particles = torch.randn(batch_size, num_particles, state_dim)
-    log_weights = torch.full((batch_size, num_particles), -torch.log(torch.tensor(float(num_particles))))
-    observation = torch.randn(batch_size, obs_dim)
+    p = popcorn_pri
+    particles = torch.randn(p.jitter_int(batch_size), num_particles, state_dim)
+    log_weights = torch.full((p.jitter_int(batch_size), num_particles), -torch.log(torch.tensor(float(num_particles))))
+    observation = torch.randn(p.jitter_int(batch_size), obs_dim)
     return [particles, log_weights, observation]
 
 

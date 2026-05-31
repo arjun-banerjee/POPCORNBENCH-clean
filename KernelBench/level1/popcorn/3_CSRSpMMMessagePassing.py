@@ -41,20 +41,11 @@ avg_degree = 20
 feat_dim = 96
 
 
-def _make_graph():
-    degree = torch.full((num_nodes,), avg_degree, dtype=torch.int32)
-    degree = torch.clamp(degree + ((torch.arange(num_nodes, dtype=torch.int32) % 9) - 4), min=1)
-    row_ptr = torch.zeros(num_nodes + 1, dtype=torch.int32)
-    row_ptr[1:] = torch.cumsum(degree, dim=0)
-    num_edges = int(row_ptr[-1].item())
-    col_idx = torch.randint(0, num_nodes, (num_edges,), dtype=torch.int32)
-    edge_weight = torch.randn(num_edges, dtype=torch.float32)
-    node_feat = torch.randn(num_nodes, feat_dim, dtype=torch.float32)
-    return row_ptr, col_idx, edge_weight, node_feat
 
 
 def get_inputs():
-    return list(_make_graph())
+    return list(popcorn_pri.make_csr_graph_with_edge_weights(num_nodes, avg_degree, feat_dim))
+
 
 
 def get_init_inputs():

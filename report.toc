@@ -1,0 +1,43 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Experimental Sets}{3}{subsection.1.1}%
+\contentsline {section}{\numberline {2}Label Fix Summary}{4}{section.2}%
+\contentsline {section}{\numberline {3}Pareto Frontier Analysis}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Pareto Pair P1: Compute \% vs DRAM Utilization}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Pareto Pair P2: SOL Score vs Speedup/Reference}{8}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Pareto Pair P3: Power (W) vs Energy (mJ)}{11}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Pareto Pair P4: Fusion vs Occupancy}{14}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Pareto Pair P5: DRAM Utilization vs Speedup}{17}{subsection.3.5}%
+\contentsline {section}{\numberline {4}General Performance Analysis}{20}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Set\nobreakspace {}1 General Plots}{20}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Set\nobreakspace {}2 General Plots}{26}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Set\nobreakspace {}3 General Plots}{32}{subsection.4.3}%
+\contentsline {section}{\numberline {5}Combined Overview Plots}{39}{section.5}%
+\contentsline {section}{\numberline {6}Exploratory Analysis}{43}{section.6}%
+\contentsline {subsection}{\numberline {6.1}E1 learning curve by level.png}{43}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}E2 efficiency frontier.png}{43}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}E3 failure modes.png}{45}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}E4 corr heatmap set1.png}{45}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}E4 corr heatmap set2.png}{47}{subsection.6.5}%
+\contentsline {subsection}{\numberline {6.6}E4 corr heatmap set3.png}{47}{subsection.6.6}%
+\contentsline {subsection}{\numberline {6.7}E5 model ranking speedup vs correctness.png}{49}{subsection.6.7}%
+\contentsline {subsection}{\numberline {6.8}E6 metric variance.png}{49}{subsection.6.8}%
+\contentsline {subsection}{\numberline {6.9}E7 parallel coordinates.png}{50}{subsection.6.9}%
+\contentsline {subsection}{\numberline {6.10}E8 task difficulty.png}{51}{subsection.6.10}%
+\contentsline {subsection}{\numberline {6.11}E9 step efficiency.png}{51}{subsection.6.11}%
+\contentsline {subsection}{\numberline {6.12}E10 radar chart.png}{53}{subsection.6.12}%
+\contentsline {subsection}{\numberline {6.13}E11 energy efficiency ratio.png}{53}{subsection.6.13}%
+\contentsline {subsection}{\numberline {6.14}E12 dram saturation.png}{55}{subsection.6.14}%
+\contentsline {subsection}{\numberline {6.15}E13 pareto dominance heatmap.png}{55}{subsection.6.15}%
+\contentsline {subsection}{\numberline {6.16}E14 cross set correctness.png}{57}{subsection.6.16}%
+\contentsline {subsection}{\numberline {6.17}E15 timeout impact timeline.png}{57}{subsection.6.17}%
+\contentsline {subsection}{\numberline {6.18}E16 occupancy vs fusion.png}{59}{subsection.6.18}%
+\contentsline {subsection}{\numberline {6.19}E17 sol score cdf.png}{59}{subsection.6.19}%
+\contentsline {subsection}{\numberline {6.20}E18 set2 speedup by mode.png}{60}{subsection.6.20}%
+\contentsline {subsection}{\numberline {6.21}E19 level mode heatmap fw-glm-5-1.png}{62}{subsection.6.21}%
+\contentsline {subsection}{\numberline {6.22}E19 level mode heatmap gpt-5.5-priority.png}{62}{subsection.6.22}%
+\contentsline {subsection}{\numberline {6.23}E19 level mode heatmap grok-4.3.png}{64}{subsection.6.23}%
+\contentsline {section}{\numberline {7}Trace Analysis}{65}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Trajectory Patterns}{65}{subsection.7.1}%
+\contentsline {section}{\numberline {8}Conclusion}{66}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Top Findings}{66}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Limitations}{66}{subsection.8.2}%

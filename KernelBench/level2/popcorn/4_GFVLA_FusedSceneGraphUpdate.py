@@ -100,9 +100,10 @@ num_heads = 4
 
 
 def get_inputs():
-    nodes = torch.randn(batch_size, num_objects, dim)
-    pair_feats = torch.randn(batch_size, num_objects, num_objects, pair_dim)
-    edge_mask = torch.ones(batch_size, num_objects, num_objects)
+    p = popcorn_pri
+    nodes = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_objects), dim)
+    pair_feats = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_objects), p.jitter_int(num_objects), pair_dim)
+    edge_mask = torch.ones(p.jitter_int(batch_size), p.jitter_int(num_objects), p.jitter_int(num_objects))
     return [nodes, pair_feats, edge_mask]
 
 

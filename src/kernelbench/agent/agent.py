@@ -145,7 +145,9 @@ class KernelAgent:
         precision:          Computation precision. Default "fp32".
         device:             torch.device for evaluation.
         build_dir:          CUDA compile cache directory.
-        num_correct_trials: Correctness trials for run_correctness / submit.
+        num_correct_trials: Correctness trials for ``run_correctness`` only.
+        submit_num_correct_trials: Correctness trials for ``submit_kernel`` only;
+            when ``None``, uses ``num_correct_trials``.
         num_perf_trials:    Timing trials for submit_kernel.
         timing_method:      Timing method for submit_kernel.
         reasoning_effort:   "minimal" | "low" | "medium" | "high" | None.
@@ -156,6 +158,8 @@ class KernelAgent:
                             raises or returns an unusable response; set to 1
                             to fail fast like older versions.
         verbose:            Verbose logging.
+        stream_torchrun_stdout: When True with multi-GPU torchrun eval, subprocess
+            stdout/stderr inherit the terminal (live logs; ranks may interleave).
         tool_output_context_max_chars: Truncate tool outputs in LLM context (0 disables).
         reasoning_context_max_chars: Cap reasoning when compacting chat / storing.
         chat_context_tail_messages: If set, sliding window on chat history (tail size).
@@ -173,6 +177,9 @@ class KernelAgent:
         eval_torchrun_timeout_s: Wall-clock budget per torchrun subprocess used
             by submit_kernel / run_correctness. profile_kernel uses a fixed
             larger budget because ncu + multi-rank attach is slower.
+        reference_probe_enabled: When ``dynamic_eval_timeout`` is True, run the
+            reference forward probe unless this is False (then use the static
+            ceiling without attempting the probe).
     """
 
     def __init__(
@@ -193,6 +200,7 @@ class KernelAgent:
         device: torch.device | None = None,
         build_dir: str | None = None,
         num_correct_trials: int = 5,
+        submit_num_correct_trials: int | None = None,
         num_perf_trials: int = 100,
         timing_method: str = "cuda_event",
         reasoning_effort: str | None = None,
@@ -200,6 +208,7 @@ class KernelAgent:
         turn_delay_s: float = 0.0,
         llm_error_retries: int = 3,
         verbose: bool = False,
+        stream_torchrun_stdout: bool = False,
         api_kind: str = "openai",
         omit_responses_reasoning: bool = False,
         omit_chat_run_meta: bool = False,
@@ -220,6 +229,12 @@ class KernelAgent:
         submit_timeout_k: float = 10.0,
         submit_floor_s: int = 300,
         reference_probe_timeout_s: int = 300,
+        reference_probe_enabled: bool = True,
+        variant: str = "",
+        popcorn_stress_eval: bool = False,
+        stress_refs_root: str = "KernelBench/stress_refs2",
+        stress_tiers: tuple[str, ...] | list[str] | None = None,
+        stress_num_correct_trials_per_tier: int | None = None,
     ) -> None:
         self.problem_id = problem_id
         self.level = level
@@ -237,6 +252,7 @@ class KernelAgent:
         self.turn_delay_s = turn_delay_s
         self.llm_error_retries = max(1, int(llm_error_retries))
         self.verbose = verbose
+        self.stream_torchrun_stdout = bool(stream_torchrun_stdout)
         self.api_kind = api_kind
         self.omit_responses_reasoning = omit_responses_reasoning
         self.omit_chat_run_meta = omit_chat_run_meta
@@ -254,6 +270,12 @@ class KernelAgent:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = device
 
+        _submit_nt = (
+            max(1, int(submit_num_correct_trials))
+            if submit_num_correct_trials is not None
+            else max(1, int(num_correct_trials))
+        )
+
         # Resolve tools: `tool_names` filters the registry; get_tools() ensures
         # submit_kernel is always included.
         self.tools: list[Tool] = get_tools(tool_names)
@@ -268,9 +290,11 @@ class KernelAgent:
             device=device,
             build_dir=build_dir,
             num_correct_trials=num_correct_trials,
+            submit_num_correct_trials=_submit_nt,
             num_perf_trials=num_perf_trials,
             timing_method=timing_method,
             verbose=verbose,
+            stream_torchrun_stdout=bool(stream_torchrun_stdout),
             eval_client=eval_client,
             distributed_torchrun_world_size=max(1, int(distributed_torchrun_world_size or 1)),
             eval_torchrun_timeout_s=max(60, int(eval_torchrun_timeout_s or 3600)),
@@ -282,8 +306,15 @@ class KernelAgent:
             submit_timeout_k=float(submit_timeout_k),
             submit_floor_s=max(0, int(submit_floor_s)),
             reference_probe_timeout_s=max(30, int(reference_probe_timeout_s)),
+            reference_probe_enabled=bool(reference_probe_enabled),
             level=int(level),
             problem_id=int(problem_id),
+            variant=str(variant),
+            problem_name=str(problem_name),
+            popcorn_stress_eval=bool(popcorn_stress_eval),
+            stress_refs_root=str(stress_refs_root),
+            stress_tiers=tuple(stress_tiers or ("large", "awkward", "xl")),
+            stress_num_correct_trials_per_tier=stress_num_correct_trials_per_tier,
         )
 
         # Optional override for the first user message (e.g. hw_translation prompt).

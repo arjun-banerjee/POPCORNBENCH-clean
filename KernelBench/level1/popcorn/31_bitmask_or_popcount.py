@@ -38,9 +38,10 @@ class Model(nn.Module):
 
 def get_inputs():
     dev = default_device()
-    g = torch.Generator(device=dev)
-    g.manual_seed(15)
-    ints = torch.randint(-(2**31), 2**31 - 1, (R, B), device=dev, generator=g)
+    p = popcorn_pri
+    ints = torch.randint(
+        -(2**31), 2**31 - 1, (p.jitter_int(R), p.jitter_int(B)), device=dev
+    )
     return [ints.to(torch.int32)]
 
 

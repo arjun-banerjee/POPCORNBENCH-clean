@@ -41,6 +41,8 @@ llm_error_retries       = 5
 tool_output_context_max_chars = 120000
 reasoning_context_max_chars = 0
 chat_context_tail_messages = 96
+# When dynamic_eval_timeout is true: skip torchrun reference probe; use ceiling (see 8xh100_default.toml).
+reference_probe_enabled = false
 
 [parallelism]
 num_gpu_devices         = 8

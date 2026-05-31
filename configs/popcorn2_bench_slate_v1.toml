@@ -1,0 +1,17 @@
+# Curated popcorn2 benchmark slate (no comm/collective problems).
+# 12 L1 + 12 L2 + 10 L3 = 34 problems. Broad domain coverage.
+#
+# Used by:
+#   configs/sweep.l1234_popcorn2_bench_all.toml
+#   configs/sweep.l1234_popcorn2_bench_st.toml      (complete)
+#   configs/sweep.l1234_popcorn2_bench_default.toml (complete)
+#   scripts/export_popcorn2_bench_slate.py
+
+[slate]
+version = 2
+description = "popcorn2 bench v2: 12+12+10, no comms, domain-balanced"
+
+[slate.levels]
+1 = [2, 3, 5, 6, 7, 9, 12, 14, 16, 18, 20, 22]
+2 = [3, 6, 8, 9, 17, 21, 22, 30, 32, 36, 37, 40]
+3 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 13]

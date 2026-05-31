@@ -70,6 +70,8 @@ class AgentConfig(Config):
         self.gpu_arch = ["Ada"]
         self.timing_method = "cuda_event"
         self.num_correct_trials = 5
+        # None = use num_correct_trials for submit_kernel correctness trials.
+        self.submit_num_correct_trials = None
         self.num_perf_trials = 100
 
         # ---- Run identity ----
@@ -188,6 +190,7 @@ def main(config: AgentConfig):
         device=device,
         build_dir=build_dir,
         num_correct_trials=config.num_correct_trials,
+        submit_num_correct_trials=config.submit_num_correct_trials,
         num_perf_trials=config.num_perf_trials,
         timing_method=config.timing_method,
         reasoning_effort=config.reasoning_effort,

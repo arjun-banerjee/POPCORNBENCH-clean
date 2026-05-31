@@ -185,6 +185,9 @@ def _resolve_dynamic_eval_timeouts(ctx) -> tuple[int, int]:
     - Otherwise, probe the reference runtime once per
       (level, problem_id, world_size) and apply the documented formulas.
       Probe failure falls back to ``ctx.eval_torchrun_timeout_s``.
+    - When ``ctx.reference_probe_enabled`` is False (with dynamic eval on),
+      skip the probe entirely and use the ceiling for both tools — same
+      numeric outcome as probe failure, without spawning the probe.
 
     Side effects:
     - Caches ``t_ref`` on ``ctx._ref_runtime_cache`` keyed by
@@ -206,22 +209,27 @@ def _resolve_dynamic_eval_timeouts(ctx) -> tuple[int, int]:
     if key in cache:
         t_ref = cache[key]
     else:
-        # Probe with a small trial count — we only need an order-of-magnitude
-        # estimate. Reuses correctness's trial count cap so the probe wall
-        # time is comparable to a single correctness pass.
-        probe_trials = max(1, min(int(ctx.num_correct_trials or 5), 5))
-        t_ref = probe_reference_runtime(
-            ref_arch_src=ctx.ref_arch_src,
-            world_size=ws,
-            num_trials=probe_trials,
-            backend=ctx.backend,
-            precision_str=ctx.precision,
-            device=getattr(ctx, "device", None),
-            probe_timeout_s=int(getattr(ctx, "reference_probe_timeout_s", 300) or 300),
-            build_dir=getattr(ctx, "build_dir", None),
-            verbose=bool(getattr(ctx, "verbose", False)),
-        )
-        cache[key] = t_ref  # may be None on failure; cached so we don't retry
+        if not getattr(ctx, "reference_probe_enabled", True):
+            t_ref = None
+        else:
+            # Probe with a small trial count — we only need an order-of-magnitude
+            # estimate. Reuses correctness's trial count cap so the probe wall
+            # time is comparable to a single correctness pass.
+            probe_trials = max(1, min(int(ctx.num_correct_trials or 5), 5))
+            t_ref = probe_reference_runtime(
+                ref_arch_src=ctx.ref_arch_src,
+                world_size=ws,
+                num_trials=probe_trials,
+                backend=ctx.backend,
+                precision_str=ctx.precision,
+                device=getattr(ctx, "device", None),
+                probe_timeout_s=int(
+                    getattr(ctx, "reference_probe_timeout_s", 300) or 300
+                ),
+                build_dir=getattr(ctx, "build_dir", None),
+                verbose=bool(getattr(ctx, "verbose", False)),
+            )
+        cache[key] = t_ref  # may be None on failure or when probe disabled
 
     dyn_correctness = compute_dynamic_timeout(
         t_ref_s=t_ref,
@@ -231,18 +239,29 @@ def _resolve_dynamic_eval_timeouts(ctx) -> tuple[int, int]:
         floor_s=float(getattr(ctx, "correctness_floor_s", 120) or 0),
         ceiling_s=ceiling,
     )
+    submit_nt = max(1, int(ctx.submit_num_correct_trials))
+    if getattr(ctx, "popcorn_stress_eval", False):
+        tiers = getattr(ctx, "stress_tiers", ()) or ("large", "awkward", "xl")
+        submit_nt *= max(1, len(tiers))
     dyn_submit = compute_dynamic_timeout(
         t_ref_s=t_ref,
         overhead_s=float(getattr(ctx, "submit_overhead_s", 180) or 0),
         k=float(getattr(ctx, "submit_timeout_k", 10.0) or 0),
-        n_trials=int((ctx.num_correct_trials or 0) + (ctx.num_perf_trials or 0)),
+        n_trials=int(submit_nt + (ctx.num_perf_trials or 0)),
         floor_s=float(getattr(ctx, "submit_floor_s", 300) or 0),
         ceiling_s=ceiling,
     )
 
     if not logged.get(key):
         logged[key] = True
-        if t_ref is None:
+        if not getattr(ctx, "reference_probe_enabled", True):
+            print(
+                f"[L{level}/P{pid}] reference probe disabled by config "
+                f"(reference_probe_enabled=false, world={ws}); "
+                f"using ceiling {ceiling}s for run_correctness + submit_kernel",
+                flush=True,
+            )
+        elif t_ref is None:
             print(
                 f"[L{level}/P{pid}] reference probe FAILED (world={ws}); "
                 f"using ceiling {ceiling}s for run_correctness + submit_kernel",
@@ -273,10 +292,15 @@ class ToolContext:
     precision: str  # "fp32" | "fp16" | "bf16"
     device: torch.device  # GPU device to run on
     build_dir: str | None = None  # CUDA compile cache directory
-    num_correct_trials: int = 5  # correctness trials in submit_kernel
+    num_correct_trials: int = 5  # correctness trials for run_correctness only
+    submit_num_correct_trials: int = 5  # correctness trials inside submit_kernel
     num_perf_trials: int = 100  # timing trials in submit_kernel
     timing_method: str = "cuda_event"
     verbose: bool = False
+    # When True and ``distributed_torchrun_world_size`` > 1, torchrun subprocess
+    # inherits stdout/stderr (live logs). Enable via sweep ``[agent]
+    # stream_torchrun_stdout`` — noisy when multiple ranks print.
+    stream_torchrun_stdout: bool = False
     # Optional: when set, submit_kernel (and optionally profile_kernel) RPC
     # to a per-GPU eval server instead of running locally. Decouples eval
     # serialization from agent worker oversubscription. See eval_client.py.
@@ -301,9 +325,19 @@ class ToolContext:
     submit_timeout_k: float = 10.0
     submit_floor_s: int = 300
     reference_probe_timeout_s: int = 300
+    # When False with ``dynamic_eval_timeout`` True, skip ``probe_reference_runtime``
+    # and use the static ceiling for both tools (see ``_resolve_dynamic_eval_timeouts``).
+    reference_probe_enabled: bool = True
     # Identity used for the probe cache key (set by run_sweep.py / KernelAgent).
     level: int = 0
     problem_id: int = 0
+    variant: str = ""
+    problem_name: str = ""
+    # popcorn2: submit_kernel uses stress_refs2 tiers; run_correctness uses ref_arch_src.
+    popcorn_stress_eval: bool = False
+    stress_refs_root: str = "KernelBench/stress_refs2"
+    stress_tiers: tuple[str, ...] = ("large", "awkward", "xl")
+    stress_num_correct_trials_per_tier: int | None = None
     # Shared mutable handle for the per-worker probe cache. Initialized to
     # an empty dict in __post_init__ unless caller injects their own; tools
     # populate it lazily on first call. Keyed by (level, problem_id, world_size).
@@ -327,6 +361,210 @@ class ToolContext:
     @property
     def torch_precision(self) -> torch.dtype:
         return get_torch_dtype_from_string(self.precision)
+
+
+def _stress_trials_per_tier(ctx: ToolContext, *, for_submit: bool) -> int:
+    if ctx.stress_num_correct_trials_per_tier is not None:
+        return max(1, int(ctx.stress_num_correct_trials_per_tier))
+    if for_submit:
+        return max(1, int(ctx.submit_num_correct_trials))
+    return max(1, int(ctx.num_correct_trials))
+
+
+def _eval_canonical_reference_kernel(
+    ctx: ToolContext,
+    kernel_code: str,
+    *,
+    num_correct_trials: int,
+    num_perf_trials: int,
+    measure_performance: bool,
+    build_dir: str,
+    timeout_s: int | None = None,
+) -> "KernelExecResult | None":
+    """Eval against ``ctx.ref_arch_src`` (canonical popcorn2 problem during sweep)."""
+    ws = max(1, int(ctx.distributed_torchrun_world_size or 1))
+    if ws > 1:
+        tr = eval_kernel_via_torchrun(
+            world_size=ws,
+            original_model_src=ctx.ref_arch_src,
+            custom_model_src=kernel_code,
+            seed_num=42,
+            num_correct_trials=num_correct_trials,
+            num_perf_trials=num_perf_trials,
+            measure_performance=measure_performance,
+            timing_method=ctx.timing_method,
+            verbose=ctx.verbose,
+            stream_stdout=bool(ctx.stream_torchrun_stdout),
+            build_dir=build_dir,
+            backend=ctx.backend,
+            precision_str=ctx.precision,
+            check_for_excessive_speedup=measure_performance,
+            timeout_s=int(timeout_s) if timeout_s is not None else None,
+        )
+        if tr is not None:
+            return tr
+
+    return eval_kernel_against_ref(
+        original_model_src=ctx.ref_arch_src,
+        custom_model_src=kernel_code,
+        num_correct_trials=num_correct_trials,
+        num_perf_trials=num_perf_trials,
+        measure_performance=measure_performance,
+        timing_method=ctx.timing_method,
+        verbose=ctx.verbose,
+        build_dir=build_dir,
+        device=ctx.device,
+        backend=ctx.backend,
+        precision=ctx.torch_precision,
+        check_for_excessive_speedup=measure_performance,
+    )
+
+
+def _eval_stress_correctness_sampled(
+    ctx: ToolContext,
+    kernel_code: str,
+    *,
+    num_correct_trials: int,
+    build_dir: str,
+) -> "KernelExecResult | None":
+    """Run ``num_correct_trials`` correctness checks, each against a randomly sampled stress tier.
+
+    Tiers are sampled uniformly with replacement from ``ctx.stress_tiers`` so the
+    agent sees a mix of large / awkward / xl inputs without paying the full
+    submit_kernel cost of running every tier.
+    """
+    import hashlib as _hashlib
+    import os as _os
+
+    from kernelbench.eval import KernelExecResult, eval_kernel_against_ref
+    from kernelbench.popcorn_stress_eval import resolve_stress_ref_path
+    from kernelbench.agent.eval_server import _is_cuda_context_fatal
+
+    if not ctx.problem_name or not ctx.variant:
+        raise ValueError(
+            "stress correctness eval requires ToolContext.problem_name and variant"
+        )
+
+    tiers = list(ctx.stress_tiers)
+    stress_root = ctx.stress_refs_root
+
+    # Sample tier for each trial independently.
+    sampled = [tiers[int(torch.randint(0, len(tiers), (1,)).item())] for _ in range(num_correct_trials)]
+
+    pass_count = 0
+    first_failure: dict | None = None
+    cuda_fatal = False
+
+    for i, tier in enumerate(sampled):
+        if cuda_fatal:
+            break
+        ref_path = resolve_stress_ref_path(stress_root, tier, int(ctx.level), str(ctx.variant), str(ctx.problem_name))
+        if not ref_path.is_file():
+            # Missing tier file — treat as failure so the agent knows.
+            if first_failure is None:
+                first_failure = {"correctness_issue": f"missing stress ref for tier '{tier}': {ref_path}"}
+            continue
+
+        ref_src = ref_path.read_text(encoding="utf-8")
+        tier_slug = f"{tier}_{_hashlib.sha1(ref_src.encode()).hexdigest()[:8]}"
+        tier_build = _per_kernel_build_dir(
+            _os.path.join(build_dir, "stress_correct", tier_slug),
+            kernel_code,
+        )
+        _os.makedirs(tier_build, exist_ok=True)
+
+        # Offset seed per trial so each trial sees different random inputs.
+        result = eval_kernel_against_ref(
+            original_model_src=ref_src,
+            custom_model_src=kernel_code,
+            seed_num=42 + i,
+            num_correct_trials=1,
+            num_perf_trials=0,
+            measure_performance=False,
+            timing_method=ctx.timing_method,
+            verbose=ctx.verbose,
+            build_dir=tier_build,
+            device=ctx.device,
+            backend=ctx.backend,
+            precision=ctx.torch_precision,
+            check_for_excessive_speedup=False,
+        )
+        if result is None:
+            return None
+
+        tr = result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+        meta = tr.get("metadata") or {}
+        fatal_parts = [str(meta.get(k, "")) for k in ("error", "compilation_error", "runtime_error")]
+        if _is_cuda_context_fatal(" ".join(fatal_parts)):
+            cuda_fatal = True
+
+        if not tr.get("compiled"):
+            return KernelExecResult.model_validate(tr)
+
+        if tr.get("correctness"):
+            pass_count += 1
+        elif first_failure is None:
+            first_failure = {k: meta.get(k) for k in ("correctness_issue", "runtime_error", "max_difference", "avg_difference") if meta.get(k)}
+            first_failure["stress_tier"] = tier
+
+    trials_run = min(num_correct_trials, i + 1) if not cuda_fatal else i
+    all_passed = pass_count == trials_run and trials_run > 0
+
+    tier_counts: dict[str, int] = {}
+    for t in sampled[:trials_run]:
+        tier_counts[t] = tier_counts.get(t, 0) + 1
+
+    meta_out: dict = {
+        "stress_popcorn_correctness_sampled": True,
+        "stress_tiers_sampled": sampled[:trials_run],
+        "stress_tier_counts": tier_counts,
+        "correctness_trials": f"stress-sampled {pass_count}/{trials_run} trials",
+    }
+    if first_failure:
+        meta_out.update(first_failure)
+
+    return KernelExecResult(
+        compiled=True,
+        correctness=all_passed,
+        metadata=meta_out,
+        runtime=-1.0,
+    )
+
+
+def _eval_stress_reference_kernel(
+    ctx: ToolContext,
+    kernel_code: str,
+    *,
+    num_correct_trials: int,
+    num_perf_trials: int,
+    measure_performance: bool,
+    build_dir: str,
+) -> "KernelExecResult | None":
+    """Eval against stress_refs2 tiers (large / awkward / xl) — submit_kernel only."""
+    from kernelbench.popcorn_stress_eval import eval_kernel_stress_tiers
+
+    if not ctx.problem_name or not ctx.variant:
+        raise ValueError(
+            "stress submit eval requires ToolContext.problem_name and variant"
+        )
+    return eval_kernel_stress_tiers(
+        kernel_code=kernel_code,
+        level=int(ctx.level),
+        variant=str(ctx.variant),
+        problem_name=str(ctx.problem_name),
+        stress_refs_root=ctx.stress_refs_root,
+        tiers=ctx.stress_tiers,
+        num_correct_trials=num_correct_trials,
+        num_perf_trials=num_perf_trials,
+        measure_performance=measure_performance,
+        build_dir=build_dir,
+        device=ctx.device,
+        backend=ctx.backend,
+        precision=ctx.torch_precision,
+        timing_method=ctx.timing_method,
+        verbose=ctx.verbose,
+        check_for_excessive_speedup=measure_performance,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -506,39 +744,21 @@ class RunCorrectnessTool(Tool):
         build_dir = _per_kernel_build_dir(ctx.build_dir, kernel_code)
 
         def _run_correct_once() -> KernelExecResult | None:
-            ws = max(1, int(ctx.distributed_torchrun_world_size or 1))
-            if ws > 1:
-                tr = eval_kernel_via_torchrun(
-                    world_size=ws,
-                    original_model_src=ctx.ref_arch_src,
-                    custom_model_src=kernel_code,
-                    seed_num=42,
+            if ctx.popcorn_stress_eval and ctx.problem_name and ctx.variant:
+                return _eval_stress_correctness_sampled(
+                    ctx,
+                    kernel_code,
                     num_correct_trials=ctx.num_correct_trials,
-                    num_perf_trials=0,
-                    measure_performance=False,
-                    timing_method=ctx.timing_method,
-                    verbose=ctx.verbose,
                     build_dir=build_dir,
-                    backend=ctx.backend,
-                    precision_str=ctx.precision,
-                    check_for_excessive_speedup=False,
-                    timeout_s=int(dyn_correctness_s),
                 )
-                if tr is not None:
-                    return tr
-                # Fall through to single-GPU eval.
-            return eval_kernel_against_ref(
-                original_model_src=ctx.ref_arch_src,
-                custom_model_src=kernel_code,
+            return _eval_canonical_reference_kernel(
+                ctx,
+                kernel_code,
                 num_correct_trials=ctx.num_correct_trials,
                 num_perf_trials=0,
                 measure_performance=False,
-                verbose=ctx.verbose,
                 build_dir=build_dir,
-                device=ctx.device,
-                backend=ctx.backend,
-                precision=ctx.torch_precision,
-                check_for_excessive_speedup=False,
+                timeout_s=int(dyn_correctness_s),
             )
 
         try:
@@ -726,64 +946,127 @@ class ProfileKernelTool(Tool):
                 ROOFLINE_METRICS=ROOFLINE_METRICS,
             )
 
-        request = {
-            "custom_model_src": kernel_code,
-            "ref_model_src": ctx.ref_arch_src,
-            "metrics": ROOFLINE_METRICS,
-            "num_trials": 1,
-            "seed": 42,
-            "device_index": ctx.device.index or 0,
-            "backend": ctx.backend,
-            "precision": ctx.precision,
-            "build_dir": _per_kernel_build_dir(ctx.build_dir, kernel_code),
-            "verbose": ctx.verbose,
-        }
+        def _run_worker(ref_src: str, seed: int = 42) -> "dict | ToolResult":
+            """Run the profile worker with the given ref source. Returns raw metrics dict or a failure ToolResult."""
+            request = {
+                "custom_model_src": kernel_code,
+                "ref_model_src": ref_src,
+                "metrics": ROOFLINE_METRICS,
+                "num_trials": 1,
+                "seed": seed,
+                "device_index": ctx.device.index or 0,
+                "backend": ctx.backend,
+                "precision": ctx.precision,
+                "build_dir": _per_kernel_build_dir(ctx.build_dir, kernel_code),
+                "verbose": ctx.verbose,
+            }
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+                    json.dump(request, tmp)
+                    req_path = tmp.name
+
+                proc = subprocess.run(
+                    [sys.executable, self._WORKER_SCRIPT, req_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                os.unlink(req_path)
+
+                if proc.returncode != 0:
+                    stderr_tail = (proc.stderr or "").strip()[-500:]
+                    return ToolResult(
+                        tool_name=self.name,
+                        success=False,
+                        output=f"profile_kernel FAILED: worker exited with code {proc.returncode}.\n{stderr_tail}",
+                        metadata={"error": stderr_tail},
+                    )
+
+                raw = json.loads(proc.stdout.strip().splitlines()[-1])
+                if "error" in raw:
+                    return ToolResult(
+                        tool_name=self.name,
+                        success=False,
+                        output=f"profile_kernel FAILED: {raw['error']}",
+                        metadata={"error": raw["error"]},
+                    )
+                return raw
+
+            except subprocess.TimeoutExpired:
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output="profile_kernel FAILED: profiling timed out (900s).",
+                    metadata={"error": "timeout"},
+                )
+            except Exception as e:
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output=f"profile_kernel FAILED: {type(e).__name__}: {e}",
+                    metadata={"error": str(e)},
+                )
+
+        # Resolve xl stress ref when stress eval is configured.
+        xl_ref_src: str | None = None
+        if ctx.popcorn_stress_eval and ctx.problem_name and ctx.variant:
+            from kernelbench.popcorn_stress_eval import resolve_stress_ref_path
+            xl_path = resolve_stress_ref_path(
+                ctx.stress_refs_root, "xl", int(ctx.level), str(ctx.variant), str(ctx.problem_name)
+            )
+            if xl_path.is_file():
+                xl_ref_src = xl_path.read_text(encoding="utf-8")
 
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False
-            ) as tmp:
-                json.dump(request, tmp)
-                req_path = tmp.name
+            # Always profile against canonical ref.
+            raw_ref = _run_worker(ctx.ref_arch_src, seed=42)
+            if isinstance(raw_ref, ToolResult):
+                return raw_ref
 
-            proc = subprocess.run(
-                [sys.executable, self._WORKER_SCRIPT, req_path],
-                capture_output=True,
-                text=True,
-                timeout=900,
-            )
+            device_name = torch.cuda.get_device_name(ctx.device)
+            previous = ctx._last_profile_summary
 
-            os.unlink(req_path)
+            ref_breakdown = raw_ref.pop("_kernel_breakdown", [])
+            summary_ref = parse_nsight_metrics(raw_ref, device_name, kernel_breakdown=ref_breakdown)
 
-            if proc.returncode != 0:
-                stderr_tail = (proc.stderr or "").strip()[-500:]
-                return ToolResult(
-                    tool_name=self.name,
-                    success=False,
-                    output=(
-                        f"profile_kernel FAILED: worker exited with code "
-                        f"{proc.returncode}.\n{stderr_tail}"
-                    ),
-                    metadata={"error": stderr_tail},
-                )
+            rendered_lines = [
+                "profile_kernel PASSED: profiling complete.",
+                "",
+                "===== Input: canonical ref =====",
+                summary_ref.format_for_llm(previous=previous),
+            ]
+            metadata: dict = {
+                "raw_metrics_ref": {k: v for k, v in raw_ref.items() if v is not None},
+                "bottleneck": summary_ref.bottleneck,
+                "dram_utilization_pct": summary_ref.dram_utilization_pct,
+                "dominant_pipe": summary_ref.dominant_pipe,
+                "dominant_utilization_pct": summary_ref.dominant_utilization_pct,
+                "occupancy_pct": summary_ref.occupancy_pct,
+                "top_stall": (
+                    max(summary_ref.warp_stalls.items(), key=lambda x: x[1])
+                    if summary_ref.warp_stalls else None
+                ),
+            }
 
-            raw_output = json.loads(proc.stdout.strip().splitlines()[-1])
+            ctx._last_profile_summary = summary_ref
 
-            if "error" in raw_output:
-                return ToolResult(
-                    tool_name=self.name,
-                    success=False,
-                    output=f"profile_kernel FAILED: {raw_output['error']}",
-                    metadata={"error": raw_output["error"]},
-                )
+            if xl_ref_src is not None:
+                raw_xl = _run_worker(xl_ref_src, seed=42)
+                if not isinstance(raw_xl, ToolResult):
+                    xl_breakdown = raw_xl.pop("_kernel_breakdown", [])
+                    summary_xl = parse_nsight_metrics(raw_xl, device_name, kernel_breakdown=xl_breakdown)
+                    rendered_lines += [
+                        "",
+                        "===== Input: xl stress tier =====",
+                        summary_xl.format_for_llm(previous=summary_ref),
+                    ]
+                    metadata["raw_metrics_xl"] = {k: v for k, v in raw_xl.items() if v is not None}
+                    metadata["xl_bottleneck"] = summary_xl.bottleneck
+                    metadata["xl_dram_utilization_pct"] = summary_xl.dram_utilization_pct
+                    metadata["xl_occupancy_pct"] = summary_xl.occupancy_pct
+                else:
+                    rendered_lines += ["", f"===== xl stress tier: FAILED ({raw_xl.output}) ====="]
 
-        except subprocess.TimeoutExpired:
-            return ToolResult(
-                tool_name=self.name,
-                success=False,
-                output="profile_kernel FAILED: profiling timed out (900s).",
-                metadata={"error": "timeout"},
-            )
         except Exception as e:
             return ToolResult(
                 tool_name=self.name,
@@ -792,39 +1075,11 @@ class ProfileKernelTool(Tool):
                 metadata={"error": str(e)},
             )
 
-        kernel_breakdown = raw_output.pop("_kernel_breakdown", [])
-        raw_metrics = raw_output
-
-        device_name = torch.cuda.get_device_name(ctx.device)
-        previous = ctx._last_profile_summary
-        summary = parse_nsight_metrics(
-            raw_metrics, device_name, kernel_breakdown=kernel_breakdown
-        )
-
-        ctx._last_profile_summary = summary
-
         result = ToolResult(
             tool_name=self.name,
             success=True,
-            output=(
-                f"profile_kernel PASSED: profiling complete.\n"
-                f"{summary.format_for_llm(previous=previous)}"
-            ),
-            metadata={
-                "raw_metrics": {
-                    k: v for k, v in raw_metrics.items() if v is not None
-                },
-                "bottleneck": summary.bottleneck,
-                "dram_utilization_pct": summary.dram_utilization_pct,
-                "dominant_pipe": summary.dominant_pipe,
-                "dominant_utilization_pct": summary.dominant_utilization_pct,
-                "occupancy_pct": summary.occupancy_pct,
-                "top_stall": (
-                    max(summary.warp_stalls.items(), key=lambda x: x[1])
-                    if summary.warp_stalls
-                    else None
-                ),
-            },
+            output="\n".join(rendered_lines),
+            metadata=metadata,
         )
         self._profile_cache[cache_key] = result
         return result
@@ -1195,46 +1450,28 @@ class SubmitKernelTool(Tool):
         try:
 
             def _run_eval_once() -> KernelExecResult | None:
-                ws = max(1, int(ctx.distributed_torchrun_world_size or 1))
-                # Multi-rank trigger: world_size > 1 alone. No longer gated on
-                # whether the reference imports distributed_collectives — the
-                # 8xH100 sweep deliberately runs non-collective oracles on
-                # all 8 ranks (rank 0 reports, others redundantly compute).
-                if ws > 1:
-                    tr = eval_kernel_via_torchrun(
-                        world_size=ws,
-                        original_model_src=ctx.ref_arch_src,
-                        custom_model_src=kernel_code,
-                        seed_num=42,
-                        num_correct_trials=ctx.num_correct_trials,
+                nt = (
+                    _stress_trials_per_tier(ctx, for_submit=True)
+                    if ctx.popcorn_stress_eval
+                    else ctx.submit_num_correct_trials
+                )
+                if ctx.popcorn_stress_eval:
+                    return _eval_stress_reference_kernel(
+                        ctx,
+                        kernel_code,
+                        num_correct_trials=nt,
                         num_perf_trials=ctx.num_perf_trials,
                         measure_performance=True,
-                        timing_method=ctx.timing_method,
-                        verbose=ctx.verbose,
                         build_dir=build_dir,
-                        backend=ctx.backend,
-                        precision_str=ctx.precision,
-                        check_for_excessive_speedup=True,
-                        timeout_s=int(dyn_submit_s),
                     )
-                    if tr is not None:
-                        return tr
-                    # Too few GPUs visible after clearing CUDA_VISIBLE_DEVICES:
-                    # fall through to single-GPU eval.
-
-                return eval_kernel_against_ref(
-                    original_model_src=ctx.ref_arch_src,
-                    custom_model_src=kernel_code,
-                    num_correct_trials=ctx.num_correct_trials,
+                return _eval_canonical_reference_kernel(
+                    ctx,
+                    kernel_code,
+                    num_correct_trials=nt,
                     num_perf_trials=ctx.num_perf_trials,
                     measure_performance=True,
-                    timing_method=ctx.timing_method,
-                    verbose=ctx.verbose,
                     build_dir=build_dir,
-                    device=ctx.device,
-                    backend=ctx.backend,
-                    precision=ctx.torch_precision,
-                    check_for_excessive_speedup=True,
+                    timeout_s=int(dyn_submit_s),
                 )
 
             result: KernelExecResult | None = _run_with_oom_retry(

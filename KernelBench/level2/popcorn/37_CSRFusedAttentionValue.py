@@ -42,15 +42,12 @@ feat_dim = 64
 
 
 def get_inputs():
-    degree = torch.full((num_nodes,), avg_degree, dtype=torch.int32)
-    degree = torch.clamp(degree + ((torch.arange(num_nodes, dtype=torch.int32) % 7) - 3), min=1)
-    row_ptr = torch.zeros(num_nodes + 1, dtype=torch.int32)
-    row_ptr[1:] = torch.cumsum(degree, dim=0)
-    num_edges = int(row_ptr[-1].item())
-    col_idx = torch.randint(0, num_nodes, (num_edges,), dtype=torch.int32)
-    edge_scores = torch.randn(num_edges, dtype=torch.float32)
-    node_value = torch.randn(num_nodes, feat_dim, dtype=torch.float32)
-    return [row_ptr, col_idx, edge_scores, node_value]
+    return list(
+        popcorn_pri.make_csr_fused_attention_value_graph(
+            num_nodes, avg_degree, feat_dim
+        )
+    )
+
 
 
 def get_init_inputs():

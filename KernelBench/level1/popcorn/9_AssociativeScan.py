@@ -32,8 +32,8 @@ d_model = 256
 seq_len = 4096
 
 def get_inputs():
-    a = torch.sigmoid(torch.randn(batch_size, seq_len, d_model))
-    b = torch.randn(batch_size, seq_len, d_model)
+    a = torch.sigmoid(torch.randn(popcorn_pri.jitter_int(batch_size), popcorn_pri.jitter_int(seq_len), d_model))
+    b = torch.randn(popcorn_pri.jitter_int(batch_size), popcorn_pri.jitter_int(seq_len), d_model)
     return [a, b]
 
 def get_init_inputs():

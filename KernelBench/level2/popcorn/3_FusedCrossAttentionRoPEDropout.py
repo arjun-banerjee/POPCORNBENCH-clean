@@ -120,8 +120,12 @@ dropout_p = 0.0
 
 
 def get_inputs():
-    x_query = torch.randn(batch_size, seq_len_q, dim)
-    x_kv = torch.randn(batch_size, seq_len_kv, dim)
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    tq = p.jitter_int(seq_len_q)
+    tk = p.jitter_int(seq_len_kv)
+    x_query = torch.randn(bs, tq, dim)
+    x_kv = torch.randn(bs, tk, dim)
     return [x_query, x_kv]
 
 

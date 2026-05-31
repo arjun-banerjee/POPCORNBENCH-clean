@@ -54,10 +54,11 @@ rank = 24
 
 
 def get_inputs():
-    q = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    kv_latent = torch.randn(batch_size, seq_len, rank, dtype=torch.float32)
-    w_up_k = torch.randn(rank, num_heads, head_dim, dtype=torch.float32)
-    w_up_v = torch.randn(rank, num_heads, head_dim, dtype=torch.float32)
+    p = popcorn_pri
+    q = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    kv_latent = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), rank, dtype=torch.float32)
+    w_up_k = torch.randn(rank, p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    w_up_v = torch.randn(rank, p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
     return [q, kv_latent, w_up_k, w_up_v]
 
 

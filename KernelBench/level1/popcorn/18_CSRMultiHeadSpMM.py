@@ -44,15 +44,12 @@ head_dim = 32
 
 
 def get_inputs():
-    degree = torch.full((num_nodes,), avg_degree, dtype=torch.int32)
-    degree = torch.clamp(degree + ((torch.arange(num_nodes, dtype=torch.int32) % 5) - 2), min=1)
-    row_ptr = torch.zeros(num_nodes + 1, dtype=torch.int32)
-    row_ptr[1:] = torch.cumsum(degree, dim=0)
-    num_edges = int(row_ptr[-1].item())
-    col_idx = torch.randint(0, num_nodes, (num_edges,), dtype=torch.int32)
-    edge_weight = torch.randn(num_edges, num_heads, dtype=torch.float32)
-    node_feat = torch.randn(num_nodes, num_heads, head_dim, dtype=torch.float32)
-    return [row_ptr, col_idx, edge_weight, node_feat]
+    return list(
+        popcorn_pri.make_csr_multihead_spmm_graph(
+            num_nodes, avg_degree, num_heads, head_dim
+        )
+    )
+
 
 
 def get_init_inputs():

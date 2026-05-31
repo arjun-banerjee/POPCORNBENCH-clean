@@ -101,10 +101,11 @@ total_timesteps = 1000
 
 
 def get_inputs():
-    x = torch.randn(batch_size, dim)
+    p = popcorn_pri
+    x = torch.randn(p.jitter_int(batch_size), dim)
     low = num_fused_steps
     high = total_timesteps
-    t_start = torch.randint(low, high, (batch_size,), dtype=torch.long)
+    t_start = torch.randint(low, high, (p.jitter_int(batch_size),), dtype=torch.long)
     return [x, t_start]
 
 

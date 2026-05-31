@@ -43,7 +43,8 @@ batch_size = 8
 
 
 def get_inputs():
-    coords = torch.randn(batch_size, num_atoms, 3)
+    p = popcorn_pri
+    coords = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_atoms), 3)
     diff = coords.unsqueeze(2) - coords.unsqueeze(1)
     distances = torch.sqrt((diff ** 2).sum(-1) + 1e-8)
     return [distances]

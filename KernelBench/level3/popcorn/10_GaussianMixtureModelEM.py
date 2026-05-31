@@ -74,6 +74,7 @@ num_data = 2048
 
 
 def get_inputs():
+    p = popcorn_pri
     return [torch.randn(num_data, dim)]
 
 

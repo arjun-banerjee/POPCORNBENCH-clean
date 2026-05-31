@@ -452,6 +452,11 @@ def run_one(
                 device=device,
                 build_dir=build_dir,
                 num_correct_trials=run_cfg["num_correct_trials"],
+                submit_num_correct_trials=(
+                    int(run_cfg["submit_num_correct_trials"])
+                    if run_cfg.get("submit_num_correct_trials") is not None
+                    else None
+                ),
                 num_perf_trials=run_cfg["num_perf_trials"],
                 timing_method=run_cfg["timing_method"],
                 reasoning_effort=model_cfg.get("reasoning_effort")
@@ -459,7 +464,10 @@ def run_one(
                 warn_turns_remaining=agent_cfg.get("warn_turns_remaining", 2),
                 turn_delay_s=float(agent_cfg.get("turn_delay_s", 0.0)),
                 llm_error_retries=int(agent_cfg.get("llm_error_retries", 3)),
-                verbose=False,
+                verbose=bool(agent_cfg.get("verbose", False)),
+                stream_torchrun_stdout=bool(
+                    agent_cfg.get("stream_torchrun_stdout", False)
+                ),
                 api_kind=api_kind,
                 save_path=traj_path,
                 eval_client=eval_client,
@@ -507,6 +515,28 @@ def run_one(
                 ),
                 reference_probe_timeout_s=int(
                     agent_cfg.get("reference_probe_timeout_s", 300)
+                ),
+                reference_probe_enabled=bool(
+                    agent_cfg.get("reference_probe_enabled", True)
+                ),
+                variant=work.variant,
+                popcorn_stress_eval=bool(
+                    run_cfg.get(
+                        "popcorn_stress_eval",
+                        work.variant == "popcorn2",
+                    )
+                ),
+                stress_refs_root=str(
+                    run_cfg.get("stress_refs_root", "KernelBench/stress_refs2")
+                ),
+                stress_tiers=tuple(
+                    run_cfg.get("stress_tiers", ("large", "awkward", "xl"))
+                ),
+                stress_num_correct_trials_per_tier=(
+                    int(run_cfg["stress_num_correct_trials_per_tier"])
+                    if run_cfg.get("stress_num_correct_trials_per_tier")
+                    is not None
+                    else None
                 ),
             )
 
@@ -713,6 +743,17 @@ def main():
     run_cfg = sweep["run"]
     par_cfg = sweep["parallelism"]
     rep_cfg = sweep.get("report", {"enabled": True, "refresh_seconds": 30})
+
+    _nct = int(run_cfg["num_correct_trials"])
+    _snct_raw = run_cfg.get("submit_num_correct_trials")
+    _snct = int(_snct_raw) if _snct_raw is not None else _nct
+    print(
+        "[run_sweep] correctness trials: "
+        f"run_correctness num_correct_trials={_nct}; "
+        f"submit_kernel submit_num_correct_trials={_snct} "
+        f"({'from [run]' if _snct_raw is not None else 'omitted → same as run_correctness'})",
+        flush=True,
+    )
 
     run_dir = os.path.join(
         run_cfg.get("runs_dir", os.path.join(REPO_TOP_DIR, "runs")),

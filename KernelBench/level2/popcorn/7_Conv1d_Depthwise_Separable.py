@@ -34,7 +34,7 @@ stride = 1
 padding = 4
 
 def get_inputs():
-    return [torch.randn(batch_size, in_channels, seq_len)]
+    return [torch.randn(popcorn_pri.jitter_int(batch_size), in_channels, popcorn_pri.jitter_int(seq_len))]
 
 def get_init_inputs():
     return [in_channels, out_channels, kernel_size, stride, padding]

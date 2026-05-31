@@ -27,7 +27,7 @@ kernel_size = 3
 dilation = 4
 
 def get_inputs():
-    return [torch.randn(batch_size, channels, seq_len)]
+    return [torch.randn(popcorn_pri.jitter_int(batch_size), channels, seq_len)]
 
 def get_init_inputs():
     return [channels, seq_len, kernel_size, dilation]

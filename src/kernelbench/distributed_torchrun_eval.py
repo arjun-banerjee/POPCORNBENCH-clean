@@ -12,6 +12,10 @@ NCCL whenever the model code calls ``torch.distributed``. The eval result
 (correctness + timing) is gathered on rank 0 and returned to the caller as a
 :class:`kernelbench.eval.KernelExecResult`.
 
+On every rank, ``dist.destroy_process_group()`` is invoked in a ``finally``
+block after the eval path (including barriers) so TCPStore / NCCL teardown is
+less racy when the subprocess exits.
+
 Design choices
 --------------
 1. **No gating on "is the reference collective?"**  The plan explicitly drops
@@ -30,6 +34,12 @@ Design choices
    reported.
 4. **Fail-soft (returns None) when too few GPUs are visible.**  The caller
    (``SubmitKernelTool.execute``) falls back to single-GPU eval in that case.
+5. **NCCL fail-fast defaults on the torchrun child env.**  We set
+   ``TORCH_NCCL_ASYNC_ERROR_HANDLING`` / ``NCCL_ASYNC_ERROR_HANDLING`` (unless
+   already set) so a rank error tends to abort NCCL peers instead of wedging
+   every rank until ``timeout_s``. This does not remove application-level
+   deadlocks or all driver hang classes; the subprocess timeout remains the
+   hard backstop.
 """
 
 from __future__ import annotations
@@ -39,9 +49,20 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import timedelta
 from typing import Optional
 
 import torch
+
+
+def apply_torchrun_child_nccl_failfast_defaults(env: dict) -> None:
+    """Set default env vars on a torchrun child ``env`` (mutates in place).
+
+    Uses ``setdefault`` so users can override. Intended for every subprocess
+    that launches ``torch.distributed.run`` for multi-GPU KernelBench evals.
+    """
+    env.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
+    env.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +96,20 @@ def reference_uses_torchrun_collectives(ref_src: str) -> bool:
 # ---------------------------------------------------------------------------
 # Subprocess worker (this same module is re-invoked by torchrun)
 # ---------------------------------------------------------------------------
+
+
+def _destroy_process_group_if_initialized() -> None:
+    """Best-effort teardown so TCPStore / NCCL heartbeat threads shut down cleanly."""
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        return
+    if not dist.is_initialized():
+        return
+    try:
+        dist.destroy_process_group()
+    except Exception:
+        pass
 
 
 def _worker_main(request_path: str, result_path: str) -> None:
@@ -117,7 +152,18 @@ def _worker_main(request_path: str, result_path: str) -> None:
     if world_size > 1 and not dist.is_initialized():
         backend = "nccl" if torch.cuda.is_available() else "gloo"
         try:
-            dist.init_process_group(backend=backend)
+            import inspect
+
+            init_kw: dict = {
+                "backend": backend,
+                "timeout": timedelta(minutes=30),
+            }
+            # PyTorch 2.4+: bind this rank's GPU explicitly (quiets "Guessing
+            # device ID" and avoids some heterogeneous-mapping hangs).
+            if backend == "nccl" and torch.cuda.is_available():
+                if "device_id" in inspect.signature(dist.init_process_group).parameters:
+                    init_kw["device_id"] = device
+            dist.init_process_group(**init_kw)
         except Exception as e:
             # Init can fail when only 1 GPU is actually visible (e.g. parent
             # pinned CUDA_VISIBLE_DEVICES). Surface as a clean error.
@@ -136,67 +182,70 @@ def _worker_main(request_path: str, result_path: str) -> None:
                     )
             return
 
-    mode = req.get("mode", "eval")
-    if mode == "ref_only":
-        _ref_only_worker(req, result_path, device, rank)
-        if dist.is_initialized():
-            try:
-                dist.barrier()
-            except Exception:
-                pass
-        return
-
     try:
-        result = eval_kernel_against_ref(
-            original_model_src=req["original_model_src"],
-            custom_model_src=req["custom_model_src"],
-            seed_num=int(req.get("seed_num", 42)),
-            num_correct_trials=int(req.get("num_correct_trials", 5)),
-            num_perf_trials=int(req.get("num_perf_trials", 0)),
-            measure_performance=bool(req.get("measure_performance", False)),
-            timing_method=req.get("timing_method", "cuda_event"),
-            verbose=bool(req.get("verbose", False)),
-            build_dir=req.get("build_dir"),
-            device=device,
-            backend=req.get("backend", "cuda"),
-            precision=get_torch_dtype_from_string(req.get("precision_str", "fp32")),
-            check_for_excessive_speedup=bool(
-                req.get("check_for_excessive_speedup", False)
-            ),
-        )
-    except Exception as e:
+        mode = req.get("mode", "eval")
+        if mode == "ref_only":
+            _ref_only_worker(req, result_path, device, rank)
+            if dist.is_initialized():
+                try:
+                    dist.barrier()
+                except Exception:
+                    pass
+            return
+
+        try:
+            result = eval_kernel_against_ref(
+                original_model_src=req["original_model_src"],
+                custom_model_src=req["custom_model_src"],
+                seed_num=int(req.get("seed_num", 42)),
+                num_correct_trials=int(req.get("num_correct_trials", 5)),
+                num_perf_trials=int(req.get("num_perf_trials", 0)),
+                measure_performance=bool(req.get("measure_performance", False)),
+                timing_method=req.get("timing_method", "cuda_event"),
+                verbose=bool(req.get("verbose", False)),
+                build_dir=req.get("build_dir"),
+                device=device,
+                backend=req.get("backend", "cuda"),
+                precision=get_torch_dtype_from_string(req.get("precision_str", "fp32")),
+                check_for_excessive_speedup=bool(
+                    req.get("check_for_excessive_speedup", False)
+                ),
+            )
+        except Exception as e:
+            if rank == 0:
+                with open(result_path, "w") as f:
+                    json.dump(
+                        {
+                            "error": (
+                                f"eval_kernel_against_ref raised: "
+                                f"{type(e).__name__}: {e}"
+                            ),
+                        },
+                        f,
+                    )
+            if dist.is_initialized():
+                try:
+                    dist.barrier()
+                except Exception:
+                    pass
+            return
+
+        # Rank 0 writes the canonical result; everyone else barriers and exits.
         if rank == 0:
+            if result is None:
+                payload = {"error": "eval returned None (lock contention)"}
+            else:
+                payload = {"result": json.loads(result.model_dump_json())}
             with open(result_path, "w") as f:
-                json.dump(
-                    {
-                        "error": (
-                            f"eval_kernel_against_ref raised: "
-                            f"{type(e).__name__}: {e}"
-                        ),
-                    },
-                    f,
-                )
+                json.dump(payload, f)
+
         if dist.is_initialized():
             try:
                 dist.barrier()
             except Exception:
                 pass
-        return
-
-    # Rank 0 writes the canonical result; everyone else barriers and exits.
-    if rank == 0:
-        if result is None:
-            payload = {"error": "eval returned None (lock contention)"}
-        else:
-            payload = {"result": json.loads(result.model_dump_json())}
-        with open(result_path, "w") as f:
-            json.dump(payload, f)
-
-    if dist.is_initialized():
-        try:
-            dist.barrier()
-        except Exception:
-            pass
+    finally:
+        _destroy_process_group_if_initialized()
 
 
 def _ref_only_worker(req: dict, result_path: str, device, rank: int) -> None:
@@ -292,6 +341,70 @@ def _ref_only_worker(req: dict, result_path: str, device, rank: int) -> None:
 # Parent-side launcher
 # ---------------------------------------------------------------------------
 
+_DEFAULT_TORCHRUN_SHUTDOWN_GRACE_S = 60.0
+
+
+def _torchrun_shutdown_grace_s() -> float:
+    """Seconds to wait after SIGTERM before SIGKILL (env override)."""
+    raw = os.environ.get("KERNELBENCH_TORCHRUN_SHUTDOWN_GRACE_S", "")
+    if not str(raw).strip():
+        return _DEFAULT_TORCHRUN_SHUTDOWN_GRACE_S
+    try:
+        return max(5.0, float(raw))
+    except (TypeError, ValueError):
+        return _DEFAULT_TORCHRUN_SHUTDOWN_GRACE_S
+
+
+def _terminate_torchrun_process_tree(proc: subprocess.Popen, *, grace_s: float) -> None:
+    """SIGTERM the whole process group, wait ``grace_s``, then SIGKILL if needed.
+
+    Used when ``eval_kernel_via_torchrun`` hits its wall clock so ranks can
+    run ``destroy_process_group()`` / NCCL teardown instead of an immediate
+    hard kill from ``subprocess.run(..., timeout=...)``.
+    """
+    import signal
+    import time
+
+    if proc.poll() is not None:
+        return
+    pgid: int | None = None
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, AttributeError, OSError):
+        pgid = None
+    if pgid is not None:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    else:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + max(5.0, float(grace_s))
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if proc.poll() is not None:
+        return
+    if pgid is not None:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+    else:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        pass
+
 
 def eval_kernel_via_torchrun(
     *,
@@ -304,6 +417,7 @@ def eval_kernel_via_torchrun(
     measure_performance: bool = True,
     timing_method: str = "cuda_event",
     verbose: bool = False,
+    stream_stdout: bool = False,
     build_dir: Optional[str] = None,
     backend: str = "cuda",
     precision_str: str = "fp32",
@@ -327,6 +441,16 @@ def eval_kernel_via_torchrun(
     rank then pins to ``cuda:LOCAL_RANK``). This only works when the parent
     worker is itself running with ``multi_gpu=true`` (no per-worker CVD pin);
     otherwise we'd be lying about device availability to NCCL.
+
+    When ``stream_stdout`` is True, worker stdout/stderr are not captured and
+    inherit the parent's terminal (live logs); multi-rank runs may interleave.
+
+    **Timeouts:** the parent uses ``Popen`` + ``wait(timeout=...)`` instead of
+    ``subprocess.run(timeout=...)`` so that on expiry we **SIGTERM the whole
+    process group**, wait ``KERNELBENCH_TORCHRUN_SHUTDOWN_GRACE_S`` seconds
+    (default 60), then **SIGKILL** if still alive. That gives worker ranks a
+    chance to tear down NCCL / TCPStore more cleanly than an immediate hard
+    kill (still not guaranteed for every hang).
     """
     from kernelbench.eval import KernelExecResult
 
@@ -374,11 +498,15 @@ def eval_kernel_via_torchrun(
         # clears the pin for the subprocess only.
         env.pop("CUDA_VISIBLE_DEVICES", None)
         env.pop("HIP_VISIBLE_DEVICES", None)
+        apply_torchrun_child_nccl_failfast_defaults(env)
         # PyTorch's distributed init_method "env://" reads these:
         env.setdefault("MASTER_ADDR", "127.0.0.1")
         env.setdefault("MASTER_PORT", "0")  # let torchrun pick
         # Quieter NCCL by default; users can override with their own NCCL_*.
         env.setdefault("NCCL_DEBUG", "WARN")
+        if stream_stdout:
+            # Helps trial-level prints from worker ranks flush promptly.
+            env["PYTHONUNBUFFERED"] = "1"
 
         argv = [
             sys.executable,
@@ -397,39 +525,70 @@ def eval_kernel_via_torchrun(
             res_path,
         ]
 
+        grace_s = _torchrun_shutdown_grace_s()
+        popen_kw: dict = {
+            "env": env,
+            "start_new_session": True,
+        }
+        if stream_stdout:
+            popen_kw["stdout"] = None
+            popen_kw["stderr"] = subprocess.STDOUT
+        else:
+            popen_kw["stdout"] = subprocess.PIPE
+            popen_kw["stderr"] = subprocess.PIPE
+            popen_kw["text"] = True
+
+        proc = subprocess.Popen(argv, **popen_kw)
+        timed_out = False
         try:
-            proc = subprocess.run(
-                argv,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-            )
+            proc.wait(timeout=int(timeout_s))
         except subprocess.TimeoutExpired:
+            timed_out = True
             if verbose:
                 print(
                     f"[torchrun_eval] timeout after {timeout_s}s; "
-                    "treating as failure."
+                    f"SIGTERM process group, grace {grace_s:.0f}s, then SIGKILL if needed.",
+                    flush=True,
                 )
+            _terminate_torchrun_process_tree(proc, grace_s=grace_s)
+
+        rc = proc.poll()
+        if rc is None:
+            rc = proc.wait()
+
+        captured_out = ""
+        captured_err = ""
+        if not stream_stdout and proc.stdout is not None:
+            captured_out = proc.stdout.read() or ""
+        if not stream_stdout and proc.stderr is not None:
+            captured_err = proc.stderr.read() or ""
+
+        if timed_out:
             return KernelExecResult(
                 compiled=False,
                 correctness=False,
                 metadata={
                     "compilation_error": (
                         f"torchrun eval timed out after {timeout_s}s "
-                        f"(world_size={world_size})"
+                        f"(world_size={world_size}); sent SIGTERM then SIGKILL "
+                        f"after {grace_s:.0f}s grace"
                     ),
                     "error": "torchrun_timeout",
+                    "timeout_shutdown_grace_s": grace_s,
                 },
             )
 
         if not os.path.exists(res_path):
-            tail_out = (proc.stdout or "")[-1000:]
-            tail_err = (proc.stderr or "")[-1000:]
+            if stream_stdout:
+                tail_out = "(stdout/stderr were streamed; not captured)"
+                tail_err = ""
+            else:
+                tail_out = captured_out[-1000:]
+                tail_err = captured_err[-1000:]
             if verbose:
                 print(
                     f"[torchrun_eval] no result file produced; rc="
-                    f"{proc.returncode}\nstdout tail:\n{tail_out}\n"
+                    f"{rc}\nstdout tail:\n{tail_out}\n"
                     f"stderr tail:\n{tail_err}"
                 )
             return KernelExecResult(
@@ -438,7 +597,7 @@ def eval_kernel_via_torchrun(
                 metadata={
                     "compilation_error": (
                         f"torchrun eval produced no result file "
-                        f"(rc={proc.returncode}). stderr tail: {tail_err[-400:]}"
+                        f"(rc={rc}). stderr tail: {tail_err[-400:]}"
                     ),
                     "error": "torchrun_no_result",
                 },

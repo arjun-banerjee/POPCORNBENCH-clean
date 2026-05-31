@@ -60,7 +60,7 @@ batch_size = 1024
 
 
 def get_inputs():
-    return [torch.randn(batch_size, dim)]
+    return [torch.randn(popcorn_pri.jitter_int(batch_size), dim)]
 
 
 def get_init_inputs():

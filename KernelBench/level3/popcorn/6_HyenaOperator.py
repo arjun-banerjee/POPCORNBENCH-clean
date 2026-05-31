@@ -75,7 +75,7 @@ order = 2
 short_filter_size = 3
 
 def get_inputs():
-    return [torch.randn(batch_size, seq_len, d_model)]
+    return [torch.randn(popcorn_pri.jitter_int(batch_size), seq_len, d_model)]
 
 def get_init_inputs():
     return [d_model, seq_len, order, short_filter_size]

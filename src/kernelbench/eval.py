@@ -13,7 +13,7 @@ import tempfile
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
-from typing import Union, Optional
+from typing import Union, Optional, Any
 
 import numpy as np
 import requests
@@ -164,6 +164,9 @@ def load_original_model_and_inputs(
     Load class from original NN.module pytorch code
     this is pytorch reference and we feed that to model to see if there will be any improvement
     """
+    from kernelbench import popcorn_random_inputs as popcorn_pri
+
+    context["popcorn_pri"] = popcorn_pri
 
     try:
         compile(model_original_src, "<string>", "exec")
@@ -427,6 +430,22 @@ def _process_input_tensor(input, device, backend="cuda", precision=torch.float32
     return input_tensor.to(device=device)
 
 
+def _clone_forward_inputs(inputs: list[Any]) -> list[Any]:
+    """Clone tensor arguments so reference/candidate forwards do not share mutable buffers.
+
+    Non-tensors are passed through unchanged. Used to prevent eval exploits where an
+    in-place reference ``forward`` mutates inputs before the candidate runs.
+    """
+
+    out: list[Any] = []
+    for x in inputs:
+        if isinstance(x, torch.Tensor):
+            out.append(x.clone())
+        else:
+            out.append(x)
+    return out
+
+
 def eval_kernel_against_ref(
     original_model_src: str,
     custom_model_src: str,
@@ -617,7 +636,7 @@ def eval_kernel_against_ref(
             return None
         else:
             metadata["compilation_error_name"] = get_error_name(e)
-            metadata["compilation_error"] = e
+            metadata["compilation_error"] = str(e)
             graceful_eval_cleanup(context, device, tempfile)
             return KernelExecResult(
                 compiled=False, metadata=metadata
@@ -652,7 +671,7 @@ def eval_kernel_against_ref(
         )
         # TODO: add metadata for runtime error e.g. error in launching kernel, illegal memory access, ...
         graceful_eval_cleanup(context, device, tempfile)
-        metadata["runtime_error"] = e
+        metadata["runtime_error"] = str(e)
         metadata["runtime_error_name"] = get_error_name(e)
         return KernelExecResult(
             compiled=True, correctness=False, metadata=metadata
@@ -678,7 +697,7 @@ def eval_kernel_against_ref(
         )
     except Exception as e:
         # TODO: add metadata for runtime error e.g. error in launching kernel, illegal memory access, ...
-        metadata["runtime_error"] = e
+        metadata["runtime_error"] = str(e)
         metadata["runtime_error_name"] = get_error_name(e)
         kernel_exec_result = KernelExecResult(
             compiled=True, correctness=False, metadata=metadata
@@ -720,6 +739,7 @@ def eval_kernel_against_ref(
                     num_trials=num_perf_trials,
                     verbose=verbose,
                     device=device,
+                    args_factory=lambda: _clone_forward_inputs(inputs),
                 )
                 runtime_stats = timing.get_timing_stats(elapsed_times, device=device)
 
@@ -733,10 +753,14 @@ def eval_kernel_against_ref(
                     if verbose:
                         print("[Eval] Measuring GPU Memory Efficiency")
                     custom_mem = extended_metrics.measure_memory(
-                        model_new, inputs, device
+                        model_new,
+                        _clone_forward_inputs(inputs),
+                        device,
                     )
                     ref_mem = extended_metrics.measure_memory(
-                        original_model, inputs, device
+                        original_model,
+                        _clone_forward_inputs(inputs),
+                        device,
                     )
                     kernel_exec_result.memory_stats = (
                         extended_metrics.compute_memory_stats(custom_mem, ref_mem)
@@ -751,10 +775,14 @@ def eval_kernel_against_ref(
                     if verbose:
                         print("[Eval] Measuring Kernel Launch Count / Fusion")
                     custom_launches = extended_metrics.measure_kernel_launches(
-                        model_new, inputs, device
+                        model_new,
+                        _clone_forward_inputs(inputs),
+                        device,
                     )
                     ref_launches = extended_metrics.measure_kernel_launches(
-                        original_model, inputs, device
+                        original_model,
+                        _clone_forward_inputs(inputs),
+                        device,
                     )
                     kernel_exec_result.kernel_launch_stats = (
                         extended_metrics.compute_kernel_launch_stats(
@@ -787,7 +815,7 @@ def eval_kernel_against_ref(
         except Exception as e:
             if verbose:
                 print(f"[Eval] Error in Measuring Performance: {e}")
-            kernel_exec_result.metadata["error_during_performance"] = e
+            kernel_exec_result.metadata["error_during_performance"] = str(e)
 
     ###############################################################
     # Excessive speedup check + reference timing + SOL/roofline
@@ -812,6 +840,7 @@ def eval_kernel_against_ref(
             num_trials=num_perf_trials,
             verbose=verbose,
             device=device,
+            args_factory=lambda: _clone_forward_inputs(inputs),
         )
         reference_runtime_stats = timing.get_timing_stats(
             reference_elapsed_times, device=device
@@ -950,6 +979,7 @@ def eval_kernel_against_ref(
                 num_trials=num_perf_trials,
                 verbose=verbose,
                 device=device,
+                args_factory=lambda: _clone_forward_inputs(source_inputs),
             )
             source_stats = timing.get_timing_stats(source_elapsed, device=device)
             kernel_exec_result.source_backend = source_backend_lower
@@ -1193,12 +1223,14 @@ def run_and_check_correctness(
             # (critical for stochastic kernels like MCMC, sampling, etc.)
             forward_seed = (trial_seed + 1) % (2**32)
             set_seed(forward_seed)
-            output = model(*inputs)
+            ref_inputs = _clone_forward_inputs(inputs)
+            cand_inputs = _clone_forward_inputs(inputs)
+            output = model(*ref_inputs)
             torch.cuda.synchronize(device=device)
 
             try:
                 set_seed(forward_seed)
-                output_new = model_new(*inputs)
+                output_new = model_new(*cand_inputs)
                 torch.cuda.synchronize(device=device)
 
                 tolerance = get_tolerance_for_precision(precision)

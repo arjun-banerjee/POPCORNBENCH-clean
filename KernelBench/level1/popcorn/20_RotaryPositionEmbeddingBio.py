@@ -53,8 +53,12 @@ batch_size = 4
 
 
 def get_inputs():
-    q = torch.randn(batch_size, num_heads, seq_len, dim)
-    k = torch.randn(batch_size, num_heads, seq_len, dim)
+    p = popcorn_pri
+    bs = p.jitter_int(batch_size)
+    nh = p.jitter_int(num_heads)
+    sl = p.jitter_int(seq_len)
+    q = torch.randn(bs, nh, sl, dim)
+    k = torch.randn(bs, nh, sl, dim)
     return [q, k]
 
 

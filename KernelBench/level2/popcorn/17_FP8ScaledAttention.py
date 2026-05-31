@@ -59,9 +59,10 @@ def _quantize_per_head(x: torch.Tensor):
 
 
 def get_inputs():
-    q = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    k = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    v = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
+    p = popcorn_pri
+    q = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    k = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    v = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
     q_q, q_scale = _quantize_per_head(q)
     k_q, k_scale = _quantize_per_head(k)
     v_q, v_scale = _quantize_per_head(v)

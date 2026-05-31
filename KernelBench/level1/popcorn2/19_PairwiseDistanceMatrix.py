@@ -1,0 +1,36 @@
+# popcorn2: large-tier module centers (scripts/gen_popcorn2_centers.py).
+# Source: KernelBench/level1/popcorn/19_PairwiseDistanceMatrix.py
+
+import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    """
+    Compute all-pairs Euclidean distance matrix from a 3-D point cloud.
+    A core primitive in molecular dynamics simulations, docking, and
+    distance-geometry-based structure prediction.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            coords: (B, N, 3) – 3-D coordinates of N atoms / residues
+        Returns:
+            dist: (B, N, N) – pairwise Euclidean distance matrix
+        """
+        diff = coords.unsqueeze(2) - coords.unsqueeze(1)
+        dist = torch.sqrt((diff ** 2).sum(dim=-1) + 1e-08)
+        return dist
+num_atoms = 512
+batch_size = 16
+
+def get_inputs():
+    p = popcorn_pri
+    mode = p.sample_input_mode()
+    return [torch.randn(p.trial_dim(batch_size, 'batch_size', mode=mode), p.trial_dim(num_atoms, 'num_atoms', mode=mode), 3)]
+
+def get_init_inputs():
+    return []

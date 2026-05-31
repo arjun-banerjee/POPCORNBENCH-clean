@@ -1,0 +1,42 @@
+# popcorn2: large-tier module centers (scripts/gen_popcorn2_centers.py).
+# Source: KernelBench/level1/popcorn/10_SampledDenseDenseMatmulEdges.py
+
+import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    """
+    Edge-only sampled dense-dense matmul.
+
+    For each graph edge (src, dst), compute a dot product between source and
+    destination node embeddings. This pattern appears in link prediction,
+    sampled attention, and graph contrastive learning.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, src_idx: torch.Tensor, dst_idx: torch.Tensor, src_feat: torch.Tensor, dst_feat: torch.Tensor) -> torch.Tensor:
+        src = src_feat[src_idx.long()]
+        dst = dst_feat[dst_idx.long()]
+        return (src * dst).sum(dim=-1)
+num_src_nodes = 1024
+num_dst_nodes = 768
+num_edges = 6144
+feat_dim = 128
+
+def get_inputs():
+    p = popcorn_pri
+    mode = p.sample_input_mode()
+    n_edges = p.trial_dim(num_edges, 'num_edges', mode=mode)
+    fd = p.trial_dim(feat_dim, 'feat_dim', mode=mode, align=8)
+    ns = p.trial_dim(num_src_nodes, 'num_src_nodes', mode=mode)
+    nd = p.trial_dim(num_dst_nodes, 'num_dst_nodes', mode=mode)
+    src_idx = torch.randint(0, ns, (n_edges,), dtype=torch.int32)
+    dst_idx = torch.randint(0, nd, (n_edges,), dtype=torch.int32)
+    src_feat = torch.randn(ns, fd, dtype=torch.float32)
+    dst_feat = torch.randn(nd, fd, dtype=torch.float32)
+    return [src_idx, dst_idx, src_feat, dst_feat]
+
+def get_init_inputs():
+    return []

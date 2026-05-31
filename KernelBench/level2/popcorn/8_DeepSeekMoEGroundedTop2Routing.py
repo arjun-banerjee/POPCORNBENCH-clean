@@ -33,10 +33,15 @@ alpha = 0.35
 
 
 def get_inputs():
-    token_hidden = torch.randn(num_tokens, hidden_dim, dtype=torch.float32)
-    router_logits = torch.randn(num_tokens, num_experts, dtype=torch.float32)
-    expert_ground = torch.randn(num_experts, hidden_dim, dtype=torch.float32)
+    p = popcorn_pri
+    nt = p.jitter_int(num_tokens)
+    hd = p.jitter_int(hidden_dim, align=16)
+    ne = p.jitter_int(num_experts, minimum=2)
+    token_hidden = torch.randn(nt, hd, dtype=torch.float32)
+    router_logits = torch.randn(nt, ne, dtype=torch.float32)
+    expert_ground = torch.randn(ne, hd, dtype=torch.float32)
     return [token_hidden, router_logits, expert_ground, alpha]
+
 
 
 def get_init_inputs():

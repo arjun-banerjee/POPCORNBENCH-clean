@@ -1,0 +1,75 @@
+# popcorn2 level-2 — multi-turn, full tool registry (75 turns / 500 tool calls).
+# Includes profile_kernel, disassemble_kernel, ert_roofline, stress eval on submit.
+# Models: gpt-5.5, GLM-5, Grok-4.3. 8xH100, 4 agents/GPU.
+
+[run]
+name                    = "the_final_pop_l3_popcorn2_all"
+dataset_src             = "local"
+variants                = ["popcorn2"]
+levels                  = [3]
+problem_subset          = []
+backend                 = "cuda"
+precision               = "fp32"
+gpu_arch                = ["Hopper"]
+timing_method           = "cuda_event"
+num_correct_trials      = 5
+num_perf_trials         = 100
+tools                   = "all"
+popcorn_stress_eval     = true
+stress_refs_root        = "KernelBench/stress_refs2"
+stress_tiers            = ["large", "awkward", "xl"]
+dynamic_eval_timeout    = true
+reference_probe_enabled = true
+
+[agent]
+max_turns               = 75
+max_tool_calls          = 500
+warn_turns_remaining    = 5
+reasoning_effort        = "medium"
+llm_error_retries       = 5
+tool_output_context_max_chars = 120000
+reasoning_context_max_chars   = 0
+chat_context_tail_messages    = 96
+
+[parallelism]
+num_gpu_devices         = 8
+agents_per_gpu          = 4
+use_eval_queue          = true
+worker_timeout_s        = 28800
+eval_rpc_timeout_s      = 7200
+llm_global_concurrency  = 0
+
+[report]
+enabled                 = true
+refresh_seconds         = 60
+serve                   = true
+serve_host              = "0.0.0.0"
+serve_port              = 8782
+
+[[models]]
+name                    = "gpt-5.5-priority"
+api_kind                = "openai"
+base_url                = "https://popcorn-centralus-resource.services.ai.azure.com/openai/v1/"
+api_key_env             = "POPCORN_CENTRAL_AZURE_KEY"
+rpm                     = 250
+tpm                     = 250000
+reasoning_effort        = "medium"
+
+[[models]]
+name                    = "FW-GLM-5-1"
+api_kind                = "openai_chat"
+base_url                = "https://popcorn-foundry-resource.openai.azure.com/openai/v1/"
+api_key_env             = "POPCORN_AZURE_KEY"
+rpm                     = 250
+tpm                     = 250000
+omit_chat_run_meta      = true
+
+[[models]]
+name                    = "grok-4.3"
+api_kind                = "openai_chat"
+base_url                = "https://api.x.ai/v1"
+api_key_env             = "XAI_API_KEY"
+deployment_name         = "grok-4.3"
+request_timeout_s       = 3600
+rpm                     = 60
+tpm                     = 200000

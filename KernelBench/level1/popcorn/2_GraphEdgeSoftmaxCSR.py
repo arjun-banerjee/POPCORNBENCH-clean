@@ -46,18 +46,12 @@ batchless_num_edges = num_nodes * avg_degree
 
 def _make_row_ptr(num_nodes: int, avg_degree: int) -> torch.Tensor:
     base = torch.full((num_nodes,), avg_degree, dtype=torch.int32)
-    degree_jitter = (torch.arange(num_nodes, dtype=torch.int32) % 7) - 3
-    degrees = torch.clamp(base + degree_jitter, min=1)
-    row_ptr = torch.zeros(num_nodes + 1, dtype=torch.int32)
-    row_ptr[1:] = torch.cumsum(degrees, dim=0)
     return row_ptr
 
 
 def get_inputs():
-    row_ptr = _make_row_ptr(num_nodes, avg_degree)
-    num_edges = int(row_ptr[-1].item())
-    edge_scores = torch.randn(num_edges, dtype=torch.float32)
-    return [row_ptr, edge_scores]
+    return list(popcorn_pri.make_csr_scalar_edge_scores(num_nodes, avg_degree))
+
 
 
 def get_init_inputs():

@@ -74,8 +74,9 @@ dim = 128
 
 
 def get_inputs():
-    x = torch.randn(batch_size, seq_len, dim)
-    layout_logits = torch.randn(batch_size, seq_len)
+    p = popcorn_pri
+    x = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), dim)
+    layout_logits = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len))
     return [x, layout_logits]
 
 

@@ -42,10 +42,11 @@ head_dim = 24
 
 
 def get_inputs():
-    q = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    k = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    v = torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32)
-    gate = torch.sigmoid(torch.randn(batch_size, seq_len, num_heads, head_dim, dtype=torch.float32))
+    p = popcorn_pri
+    q = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    k = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    v = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    gate = torch.sigmoid(torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32))
     return [q, k, v, gate]
 
 

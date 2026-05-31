@@ -1,0 +1,9 @@
+Missing field counts across all rows:
+  speedup: 568 missing out of 1102 total
+  dram_util: 467 missing out of 1102 total
+  compute_pct: 467 missing out of 1102 total
+  power_w: 568 missing out of 1102 total
+  energy_mj: 568 missing out of 1102 total
+  fusion: 568 missing out of 1102 total
+  occupancy: 467 missing out of 1102 total
+  sol_score: 361 missing out of 1102 total

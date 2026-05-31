@@ -2,8 +2,19 @@ import torch
 import json
 import numpy as np
 import time
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 import os
+
+
+def _timing_resolve_args(
+    args: list[Any],
+    args_factory: Optional[Callable[[], list[Any]]],
+) -> list[Any]:
+    """Fresh argument list each call when ``args_factory`` is set (for in-place forwards)."""
+
+    if args_factory is not None:
+        return args_factory()
+    return args
 
 
 def measure_ref_program_time(
@@ -207,6 +218,7 @@ def time_execution_with_cuda_event(
     discard_first: int = 1, # set to 0 to disable
     verbose: bool = True,
     device: torch.device = None,
+    args_factory: Optional[Callable[[], list[Any]]] = None,
 ) -> list[float]:
     """
     Time a CUDA kernel function over multiple trials using torch.cuda.event
@@ -238,7 +250,7 @@ def time_execution_with_cuda_event(
         
         # Warm ups
         for _ in range(num_warmup):
-            kernel_fn(*args)
+            kernel_fn(*_timing_resolve_args(args, args_factory))
             torch.cuda.synchronize(device=device)
         
         # note this only release PyTorch’s CUDA caching allocator, not necessarily clearing device's L2 cache
@@ -261,7 +273,7 @@ def time_execution_with_cuda_event(
 
             # note cuda events mark event on current stream
             start_event.record()
-            _ = kernel_fn(*args)
+            _ = kernel_fn(*_timing_resolve_args(args, args_factory))
             end_event.record() 
 
             # waits for all streams on that device
@@ -290,7 +302,9 @@ def time_execution_with_do_bench_interface(
     num_trials: int = 10,
     discard_first: int = 1, # not used here
     verbose: bool = True,
-    device: torch.device | None = None) -> list[float]:
+    device: torch.device | None = None,
+    args_factory: Optional[Callable[[], list[Any]]] = None,
+) -> list[float]:
     """
     Wrapper around Triton's do_bench for kernel timing.
 
@@ -321,7 +335,7 @@ def time_execution_with_do_bench_interface(
 
 
     from triton import testing as triton_testing
-    do_bench_fn = lambda : kernel_fn(*args) # wrap function with arguments
+    do_bench_fn = lambda: kernel_fn(*_timing_resolve_args(args, args_factory))
     with torch.cuda.device(device):
         return triton_testing.do_bench(fn=do_bench_fn,
             warmup=25,
@@ -338,7 +352,9 @@ def time_execution_with_do_bench_impl(
     num_trials: int = 10,
     discard_first: int = 1, # not used here
     verbose: bool = True,
-    device: torch.device | None = None) -> list[float]:
+    device: torch.device | None = None,
+    args_factory: Optional[Callable[[], list[Any]]] = None,
+) -> list[float]:
     """
     This is modifying the triton do_bench codebase
     See Triton's implementation for more details
@@ -375,7 +391,7 @@ def time_execution_with_do_bench_impl(
         # under the hood, di is torch.cuda (amd uses a cuda compatible interface)
         di = triton_runtime.driver.active.get_device_interface()
 
-        kernel_fn(*args)
+        kernel_fn(*_timing_resolve_args(args, args_factory))
         di.synchronize(device=device)
 
         # clear l2 cache
@@ -404,7 +420,7 @@ def time_execution_with_do_bench_impl(
         end_event = [di.Event(enable_timing=True) for i in range(num_trials)]
         # Warm-up
         for _ in range(num_warmup):
-            kernel_fn(*args)
+            kernel_fn(*_timing_resolve_args(args, args_factory))
         di.synchronize(device=device) 
         
         # Benchmark
@@ -421,7 +437,7 @@ def time_execution_with_do_bench_impl(
             triton_runtime.driver.active.clear_cache(cache)
             # record time of `fn`
             start_event[i].record()
-            kernel_fn(*args)
+            kernel_fn(*_timing_resolve_args(args, args_factory))
             end_event[i].record()
         # Record clocks
         di.synchronize(device=device)
@@ -439,6 +455,7 @@ def time_execution_with_host_time(
     discard_first: int = 1, # to reduce impact of initialization overhead
     verbose: bool = True,
     device: torch.device | None = None,
+    args_factory: Optional[Callable[[], list[Any]]] = None,
 ) -> list[float]:
     """
     Time a CUDA kernel function over multiple trials using Host (CPU) side timing
@@ -465,7 +482,7 @@ def time_execution_with_host_time(
 
     # Warm ups
     for _ in range(num_warmup):
-        kernel_fn(*args)
+        kernel_fn(*_timing_resolve_args(args, args_factory))
         torch.cuda.synchronize(device=device)
 
     print(f"[Profiling] Using device: {device} {torch.cuda.get_device_name(device)}, warm up {num_warmup}, trials {num_trials}")
@@ -484,7 +501,7 @@ def time_execution_with_host_time(
 
         # CPU-side wall clock time using perf_counter (high-resolution timer)
         start_time = time.perf_counter()
-        kernel_fn(*args)
+        kernel_fn(*_timing_resolve_args(args, args_factory))
         torch.cuda.synchronize(device=device) # wait for all stream to finish
         # this blocks the CPU until all GPU work on device is done
         # this means all kernels on all streams
@@ -507,7 +524,9 @@ def time_execution_with_nsight_python(
     num_trials: int = 10,
     discard_first: int = 1, # not used here
     verbose: bool = True,
-    device: torch.device | None = None) -> list[float]:
+    device: torch.device | None = None,
+    args_factory: Optional[Callable[[], list[Any]]] = None,
+) -> list[float]:
     """
     Time a CUDA kernel function using nsight-python.
     
@@ -534,7 +553,7 @@ def time_execution_with_nsight_python(
     with torch.cuda.device(device):
         # Warm ups
         for _ in range(num_warmup):
-            kernel_fn(*args)
+            kernel_fn(*_timing_resolve_args(args, args_factory))
             torch.cuda.synchronize(device=device)
         
         # Clear cache for cold start
@@ -547,7 +566,7 @@ def time_execution_with_nsight_python(
         # Profile with nsight - returns average time in nanoseconds
         # Wrap kernel function
         def wrapped_kernel():
-            return kernel_fn(*args)
+            return kernel_fn(*_timing_resolve_args(args, args_factory))
         
         # Profile with nsight, use gpu_time_duration.sum metric for GPU time
         metric_values = profile_with_nsight(

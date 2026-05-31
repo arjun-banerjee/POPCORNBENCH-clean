@@ -61,13 +61,14 @@ def _rope_tables(cache_len: int, half_dim: int):
 
 
 def get_inputs():
-    k_new = torch.randn(batch_size, update_len, num_heads, head_dim, dtype=torch.float32)
-    v_new = torch.randn(batch_size, update_len, num_heads, head_dim, dtype=torch.float32)
-    cos, sin = _rope_tables(cache_len, head_dim // 2)
-    cache_k = torch.randn(batch_size, cache_len, num_heads, head_dim, dtype=torch.float32)
-    cache_v = torch.randn(batch_size, cache_len, num_heads, head_dim, dtype=torch.float32)
-    base = torch.arange(update_len, dtype=torch.int32).unsqueeze(0).repeat(batch_size, 1)
-    positions = (base + torch.tensor([[7], [31]], dtype=torch.int32)) % cache_len
+    p = popcorn_pri
+    k_new = torch.randn(p.jitter_int(batch_size), p.jitter_int(update_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    v_new = torch.randn(p.jitter_int(batch_size), p.jitter_int(update_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    cos, sin = _rope_tables(p.jitter_int(cache_len), p.jitter_int(head_dim, align=8) // 2)
+    cache_k = torch.randn(p.jitter_int(batch_size), p.jitter_int(cache_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    cache_v = torch.randn(p.jitter_int(batch_size), p.jitter_int(cache_len), p.jitter_int(num_heads), p.jitter_int(head_dim, align=8), dtype=torch.float32)
+    base = torch.arange(p.jitter_int(update_len), dtype=torch.int32).unsqueeze(0).repeat(p.jitter_int(batch_size), 1)
+    positions = (base + torch.tensor([[7], [31]], dtype=torch.int32)) % p.jitter_int(cache_len)
     return [k_new, v_new, cos, sin, cache_k, cache_v, positions]
 
 

@@ -58,7 +58,8 @@ batch_size = 128
 
 
 def get_inputs():
-    return [torch.rand(batch_size, input_dim)]
+    p = popcorn_pri
+    return [torch.rand(p.jitter_int(batch_size), input_dim)]
 
 
 def get_init_inputs():

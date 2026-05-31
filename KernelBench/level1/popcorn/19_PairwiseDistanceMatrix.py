@@ -29,7 +29,8 @@ batch_size = 8
 
 
 def get_inputs():
-    return [torch.randn(batch_size, num_atoms, 3)]
+    p = popcorn_pri
+    return [torch.randn(p.jitter_int(batch_size), p.jitter_int(num_atoms), 3)]
 
 
 def get_init_inputs():

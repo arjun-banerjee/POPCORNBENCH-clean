@@ -102,7 +102,8 @@ padding = 1
 
 
 def get_inputs():
-    x = torch.randn(batch_size, in_channels, seq_len)
+    p = popcorn_pri
+    x = torch.randn(p.jitter_int(batch_size), in_channels, p.jitter_int(seq_len))
     return [x]
 
 

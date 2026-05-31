@@ -51,8 +51,9 @@ batch_size = 2
 
 
 def get_inputs():
-    pair_repr = torch.randn(batch_size, seq_len, seq_len, pair_dim)
-    pair_mask = torch.ones(batch_size, seq_len, seq_len)
+    p = popcorn_pri
+    pair_repr = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(seq_len), pair_dim)
+    pair_mask = torch.ones(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(seq_len))
     return [pair_repr, pair_mask]
 
 

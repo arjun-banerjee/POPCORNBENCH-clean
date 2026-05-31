@@ -72,7 +72,10 @@ num_samples = 128
 
 
 def get_inputs():
-    points = torch.randn(batch_size, num_points, 3)
+    p = popcorn_pri
+    points = torch.randn(
+        p.jitter_int(batch_size), p.jitter_int(num_points), 3
+    )
     return [points]
 
 

@@ -243,6 +243,7 @@ _TOPNAV_ITEMS = [
     ("Experiments", "experiments.html"),
     ("Docs", "docs.html"),
     ("Prompts", "prompts.html"),
+    ("Blog", "blog.html"),
 ]
 
 
@@ -530,6 +531,7 @@ def _build_index(worktree: Path, reports: list[tuple[str, Path]]) -> None:
     _build_experiments(worktree, reports)
     _build_docs(worktree)
     _build_prompts(worktree)
+    _build_blog(worktree)
 
 
 def _build_docs(worktree: Path) -> None:
@@ -537,6 +539,13 @@ def _build_docs(worktree: Path) -> None:
     docs_src = REPO_ROOT / "scripts" / "_docs_page.html"
     if docs_src.exists():
         (worktree / "docs.html").write_text(docs_src.read_text())
+
+
+def _build_blog(worktree: Path) -> None:
+    """Write the blog.html page from the static source in scripts/_blog_page.html."""
+    blog_src = REPO_ROOT / "scripts" / "_blog_page.html"
+    if blog_src.exists():
+        (worktree / "blog.html").write_text(blog_src.read_text())
 
 
 def _build_prompts(worktree: Path) -> None:

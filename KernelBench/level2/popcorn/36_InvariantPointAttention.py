@@ -129,12 +129,13 @@ batch_size = 2
 
 
 def get_inputs():
-    node_repr = torch.randn(batch_size, seq_len, node_dim)
-    pair_repr = torch.randn(batch_size, seq_len, seq_len, pair_dim)
-    translations = torch.randn(batch_size, seq_len, 3)
-    rotations = torch.zeros(batch_size, seq_len, 3, 3)
-    for b in range(batch_size):
-        for n in range(seq_len):
+    p = popcorn_pri
+    node_repr = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), node_dim)
+    pair_repr = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), p.jitter_int(seq_len), pair_dim)
+    translations = torch.randn(p.jitter_int(batch_size), p.jitter_int(seq_len), 3)
+    rotations = torch.zeros(p.jitter_int(batch_size), p.jitter_int(seq_len), 3, 3)
+    for b in range(p.jitter_int(batch_size)):
+        for n in range(p.jitter_int(seq_len)):
             rotations[b, n] = torch.eye(3)
     return [node_repr, pair_repr, translations, rotations]
 

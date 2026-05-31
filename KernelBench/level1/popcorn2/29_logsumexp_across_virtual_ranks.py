@@ -1,0 +1,29 @@
+# popcorn2: large-tier module centers (scripts/gen_popcorn2_centers.py).
+# Source: KernelBench/level1/popcorn/29_logsumexp_across_virtual_ranks.py
+
+"""
+Stable log-sum-exp over virtual ranks: out = logsumexp(x, dim=0), shape (B, D).
+"""
+import torch
+import torch.nn as nn
+from kernelbench.distributed_collectives import default_device
+R = 4
+B = 20
+D = 32
+
+class Model(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.logsumexp(x, dim=0)
+
+def get_inputs():
+    p = popcorn_pri
+    mode = p.sample_input_mode()
+    dev = default_device()
+    return [torch.randn(p.trial_dim(R, 'R', mode=mode), p.trial_dim(B, 'B', mode=mode), p.trial_dim(D, 'D', mode=mode, align=8), device=dev)]
+
+def get_init_inputs():
+    return []

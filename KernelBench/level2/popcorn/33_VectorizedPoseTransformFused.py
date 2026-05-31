@@ -97,9 +97,10 @@ num_points = 512
 
 
 def get_inputs():
-    points = torch.randn(batch_size, num_points, 3)
-    quat = torch.randn(batch_size, 4)
-    trans = torch.randn(batch_size, 3)
+    p = popcorn_pri
+    points = torch.randn(p.jitter_int(batch_size), p.jitter_int(num_points), 3)
+    quat = torch.randn(p.jitter_int(batch_size), 4)
+    trans = torch.randn(p.jitter_int(batch_size), 3)
     return [points, quat, trans]
 
 
